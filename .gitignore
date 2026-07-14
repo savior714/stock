@@ -1,0 +1,25 @@
+# JavaScript
+node_modules/
+.next/
+out/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+**/*.rs.bk
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Local data and logs
+*.db
+*.db-shm
+*.db-wal
+logs/
+.env
+.env.*
+!.env.example
