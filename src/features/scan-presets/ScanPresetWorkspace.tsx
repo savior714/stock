@@ -11,84 +11,21 @@ import {
   updateScanPreset,
 } from "./api";
 import { emptyPresetForm } from "./defaults";
+import {
+  conditionKey,
+  detailToForm,
+  flattenFormErrors,
+  formToInput,
+  replaceCondition,
+  type ConditionKey,
+  validateForm,
+} from "./model";
 import { ScanConditionCard } from "./ScanConditionCard";
 import type {
-  IndicatorKind,
-  ScanConditionDetail,
   ScanConditionWrite,
-  ScanPresetDetail,
   ScanPresetFormState,
   ScanPresetSummary,
-  SignalSide,
 } from "./types";
-import { FIXED_CONDITION_SLOTS } from "./types";
-
-function conditionKey(condition: { indicator: IndicatorKind; side: SignalSide }): string {
-  return `${condition.indicator}:${condition.side}`;
-}
-
-function detailToForm(detail: ScanPresetDetail): ScanPresetFormState {
-  const conditionsByKey = new Map<string, ScanConditionDetail>(
-    detail.conditions.map((condition) => [conditionKey(condition), condition]),
-  );
-
-  return {
-    id: detail.id,
-    name: detail.name,
-    conditions: FIXED_CONDITION_SLOTS.map((slot) => {
-      const key = conditionKey(slot);
-      const condition = conditionsByKey.get(key);
-
-      if (!condition) {
-        throw new Error(`조건 슬롯이 없습니다: ${key}`);
-      }
-
-      return { ...condition };
-    }),
-  };
-}
-
-function validateForm(form: ScanPresetFormState): Record<string, string> {
-  const errors: Record<string, string> = {};
-
-  const name = form.name.trim();
-
-  if (!name) {
-    errors.name = "Preset 이름을 입력하십시오.";
-  } else if (name.length > 80) {
-    errors.name = "Preset 이름은 80자 이하여야 합니다.";
-  }
-
-  if (!form.conditions.some((condition) => condition.enabled)) {
-    errors.conditions = "최소 한 개 조건을 활성화해야 합니다.";
-  }
-
-  for (const condition of form.conditions) {
-    const key = conditionKey(condition);
-
-    if (condition.period < 2 || condition.period > 500) {
-      errors[`${key}:period`] = "Period은 2~500 사이여야 합니다.";
-    }
-
-    if (condition.indicator === "rsi" || condition.indicator === "mfi") {
-      if (condition.threshold === null) {
-        errors[`${key}:threshold`] = "Threshold을 입력하십시오.";
-      } else if (condition.threshold < 0 || condition.threshold > 100) {
-        errors[`${key}:threshold`] = "Threshold은 0~100 사이여야 합니다.";
-      }
-    }
-
-    if (condition.indicator === "bollinger") {
-      if (condition.stdDevMultiplier === null) {
-        errors[`${key}:stdDevMultiplier`] = "표준편차 배수를 입력하십시오.";
-      } else if (condition.stdDevMultiplier < 0.1 || condition.stdDevMultiplier > 10) {
-        errors[`${key}:stdDevMultiplier`] = "배수는 0.1~10 사이여야 합니다.";
-      }
-    }
-  }
-
-  return errors;
-}
 
 export default function ScanPresetWorkspace() {
   const [presets, setPresets] = useState<ScanPresetSummary[]>([]);
@@ -194,9 +131,7 @@ export default function ScanPresetWorkspace() {
     (key: string, nextCondition: ScanConditionWrite) => {
       setForm((current) => ({
         ...current,
-        conditions: current.conditions.map((condition) =>
-          conditionKey(condition) === key ? nextCondition : condition,
-        ),
+        conditions: replaceCondition(current.conditions, key as ConditionKey, nextCondition),
       }));
     },
     [],
@@ -216,17 +151,15 @@ export default function ScanPresetWorkspace() {
     setFieldErrors({});
 
     const errors = validateForm(form);
-    if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
+    const flatErrors = flattenFormErrors(errors);
+    if (Object.keys(flatErrors).length > 0) {
+      setFieldErrors(flatErrors);
       return;
     }
 
     setIsSaving(true);
 
-    const input = {
-      name: form.name.trim(),
-      conditions: form.conditions,
-    };
+    const input = formToInput(form);
 
     try {
       const detail = form.id
@@ -367,7 +300,11 @@ export default function ScanPresetWorkspace() {
                 key={conditionKey(condition)}
                 condition={condition}
                 disabled={isBusy}
-                error={fieldErrors[conditionKey(condition) + ":period"] || fieldErrors[conditionKey(condition) + ":threshold"] || fieldErrors[conditionKey(condition) + ":stdDevMultiplier"]}
+                error={
+                  fieldErrors[conditionKey(condition) + ":period"] ||
+                  fieldErrors[conditionKey(condition) + ":threshold"] ||
+                  fieldErrors[conditionKey(condition) + ":stdDevMultiplier"]
+                }
                 onChange={(next) => updateCondition(conditionKey(condition), next)}
               />
             ))}
