@@ -73,7 +73,9 @@ impl Database {
         if current_version > LATEST_SCHEMA_VERSION {
             return Err(AppError::database(
                 "database schema is newer than this application",
-                format!("found version {current_version}, supported version {LATEST_SCHEMA_VERSION}"),
+                format!(
+                    "found version {current_version}, supported version {LATEST_SCHEMA_VERSION}"
+                ),
             ));
         }
 

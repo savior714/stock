@@ -382,8 +382,7 @@ fn normalize_write(input: ScanPresetWrite) -> AppResult<NormalizedScanPresetWrit
                     )
                 })?;
                 if !multiplier.is_finite()
-                    || !(MIN_STD_DEV_MULTIPLIER..=MAX_STD_DEV_MULTIPLIER)
-                        .contains(&multiplier)
+                    || !(MIN_STD_DEV_MULTIPLIER..=MAX_STD_DEV_MULTIPLIER).contains(&multiplier)
                 {
                     return Err(AppError::validation(format!(
                         "Bollinger multiplier must be between {MIN_STD_DEV_MULTIPLIER} and {MAX_STD_DEV_MULTIPLIER}"
@@ -440,12 +439,16 @@ fn replace_conditions(
             .query_row("SELECT lower(hex(randomblob(16)))", [], |row| row.get(0))
             .map_err(|error| db_error("failed to generate Scan condition id", error))?;
         let parameters_json = match condition.std_dev_multiplier {
-            Some(std_dev_multiplier) => serde_json::to_string(&BollingerParameters {
-                std_dev_multiplier,
-            })
-            .map_err(|error| {
-                AppError::internal("failed to encode Bollinger parameters", error.to_string())
-            })?,
+            Some(std_dev_multiplier) => {
+                serde_json::to_string(&BollingerParameters { std_dev_multiplier }).map_err(
+                    |error| {
+                        AppError::internal(
+                            "failed to encode Bollinger parameters",
+                            error.to_string(),
+                        )
+                    },
+                )?
+            }
             None => "{}".to_string(),
         };
 

@@ -28,10 +28,7 @@ pub fn list_scan_presets(state: State<'_, AppState>) -> AppResult<Vec<ScanPreset
 }
 
 #[tauri::command]
-pub fn get_scan_preset(
-    id: String,
-    state: State<'_, AppState>,
-) -> AppResult<ScanPresetDetail> {
+pub fn get_scan_preset(id: String, state: State<'_, AppState>) -> AppResult<ScanPresetDetail> {
     let id = ScanPresetId::new(id)?;
     state.with_database(|database| ScanPresetRepository::new(database).get(&id))
 }

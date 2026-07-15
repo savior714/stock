@@ -208,9 +208,7 @@ fn updates_and_deletes_a_preset() {
     assert_eq!(updated.conditions[0].threshold, Some(35.0));
     assert_eq!(updated.conditions[0].trigger_mode, TriggerMode::Current);
 
-    repository
-        .delete(&created.id)
-        .expect("preset must delete");
+    repository.delete(&created.id).expect("preset must delete");
     let error = repository
         .get(&created.id)
         .expect_err("deleted preset must not load");
