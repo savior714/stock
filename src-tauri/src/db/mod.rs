@@ -38,6 +38,10 @@ impl Database {
         &self.connection
     }
 
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
+
     pub fn schema_version(&self) -> AppResult<i64> {
         self.connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
