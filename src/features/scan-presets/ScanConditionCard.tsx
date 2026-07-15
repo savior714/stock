@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, type FocusEvent, useCallback, useRef, useState } from "react";
+import { type ChangeEvent, type FocusEvent, useCallback } from "react";
 
 import type { ScanConditionWrite } from "./types";
 
@@ -28,9 +28,6 @@ export function ScanConditionCard({
   error,
   onChange,
 }: ScanConditionCardProps) {
-  const [triggerMode, setTriggerMode] = useState(condition.triggerMode);
-  const cardRef = useRef<HTMLDivElement>(null);
-
   const indicatorLabel = INDICATOR_LABELS[condition.indicator] ?? condition.indicator;
   const sideLabel = SIDE_LABELS[condition.side] ?? condition.side;
 
@@ -126,7 +123,6 @@ export function ScanConditionCard({
 
   const handleTriggerModeChange = useCallback(
     (mode: "current" | "cross") => {
-      setTriggerMode(mode);
       onChange({ ...condition, triggerMode: mode });
     },
     [condition, onChange],
@@ -136,7 +132,6 @@ export function ScanConditionCard({
 
   return (
     <div
-      ref={cardRef}
       className={`condition-card${disabled ? " disabled" : ""}${!condition.enabled ? " disabled" : ""}`}
     >
       <div className="condition-card-header">
@@ -205,7 +200,7 @@ export function ScanConditionCard({
           <div className="trigger-mode-buttons">
             <button
               type="button"
-              className={`trigger-mode-button${triggerMode === "current" ? " active" : ""}`}
+              className={`trigger-mode-button${condition.triggerMode === "current" ? " active" : ""}`}
               disabled={disabled || !condition.enabled}
               onClick={() => handleTriggerModeChange("current")}
             >
@@ -213,7 +208,7 @@ export function ScanConditionCard({
             </button>
             <button
               type="button"
-              className={`trigger-mode-button${triggerMode === "cross" ? " active" : ""}`}
+              className={`trigger-mode-button${condition.triggerMode === "cross" ? " active" : ""}`}
               disabled={disabled || !condition.enabled}
               onClick={() => handleTriggerModeChange("cross")}
             >
