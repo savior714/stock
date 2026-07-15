@@ -13,7 +13,10 @@ pub struct Database {
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             fs::create_dir_all(parent).map_err(|error| {
                 AppError::database("failed to create database directory", error.to_string())
             })?;
