@@ -4,6 +4,7 @@ pub mod domain;
 pub mod error;
 pub mod indicator;
 pub mod repository;
+pub mod signal;
 pub mod state;
 
 use commands::scan_presets::{
