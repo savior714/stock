@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import ScanPresetWorkspace from "@/features/scan-presets/ScanPresetWorkspace";
 import WatchlistWorkspace from "@/features/watchlists/WatchlistWorkspace";
 
 const sections = ["Watchlists", "Scan Settings", "Results", "Logs"] as const;
@@ -43,6 +44,8 @@ export default function Home() {
 
         {active === "Watchlists" ? (
           <WatchlistWorkspace />
+        ) : active === "Scan Settings" ? (
+          <ScanPresetWorkspace />
         ) : (
           <div className="empty-state">
             <h3>{active} module</h3>

@@ -319,8 +319,64 @@ nav {
   color: #f5f7fb;
 }
 
+.scan-preset-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.4fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.scan-preset-browser {
+  padding: 20px;
+}
+
+.scan-preset-items {
+  display: grid;
+  gap: 8px;
+}
+
+.scan-preset-item {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 13px 14px;
+  background: #171c26;
+  color: #eef1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.scan-preset-item:hover {
+  border-color: #4a5b78;
+  background: #202838;
+}
+
+.scan-preset-item strong,
+.scan-preset-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-preset-item b {
+  min-width: 34px;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: #0e1219;
+  color: #c9d4e7;
+  font-size: 12px;
+  text-align: center;
+}
+
 @media (max-width: 980px) {
   .watchlist-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .scan-preset-layout {
     grid-template-columns: 1fr;
   }
 }
