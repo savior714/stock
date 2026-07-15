@@ -199,6 +199,7 @@ pub struct SignalCondition {
     pub period: u32,
     pub threshold: Option<f64>,
     pub parameters: Value,
+    pub trigger_mode: TriggerMode,
     pub enabled: bool,
     pub sort_order: i64,
 }
@@ -208,7 +209,6 @@ pub struct SignalCondition {
 pub struct ScanPreset {
     pub id: ScanPresetId,
     pub name: String,
-    pub trigger_mode: TriggerMode,
     pub conditions: Vec<SignalCondition>,
 }
 
