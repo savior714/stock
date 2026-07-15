@@ -41,9 +41,26 @@ impl AppError {
         Self::new(AppErrorCode::Validation, message)
     }
 
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::NotFound, message)
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::Conflict, message)
+    }
+
     pub fn database(message: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             code: AppErrorCode::Database,
+            message: message.into(),
+            detail: Some(detail.into()),
+            retryable: false,
+        }
+    }
+
+    pub fn internal(message: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::Internal,
             message: message.into(),
             detail: Some(detail.into()),
             retryable: false,
@@ -83,5 +100,13 @@ mod tests {
 
         assert_eq!(value["code"], "invalid_market_data");
         assert_eq!(value["retryable"], false);
+    }
+
+    #[test]
+    fn creates_conflict_error() {
+        let error = AppError::conflict("duplicate watchlist");
+
+        assert_eq!(error.code, AppErrorCode::Conflict);
+        assert_eq!(error.message, "duplicate watchlist");
     }
 }
