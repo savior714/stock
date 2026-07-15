@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import WatchlistWorkspace from "@/features/watchlists/WatchlistWorkspace";
+
 const sections = ["Watchlists", "Scan Settings", "Results", "Logs"] as const;
 type Section = (typeof sections)[number];
 
@@ -31,20 +33,22 @@ export default function Home() {
       <section className="workspace">
         <header className="workspace-header">
           <div>
-            <p className="eyebrow">MVP scaffold</p>
+            <p className="eyebrow">Personal stock scanner</p>
             <h2>{active}</h2>
           </div>
-          <button className="primary-button" disabled>
+          <button className="scan-button" disabled>
             Scan unavailable
           </button>
         </header>
 
-        <div className="empty-state">
-          <h3>{active} module</h3>
-          <p>
-            이 영역은 다음 milestone에서 SQLite 기반 도메인 기능과 연결됩니다.
-          </p>
-        </div>
+        {active === "Watchlists" ? (
+          <WatchlistWorkspace />
+        ) : (
+          <div className="empty-state">
+            <h3>{active} module</h3>
+            <p>이 영역은 다음 milestone에서 SQLite 기반 도메인 기능과 연결됩니다.</p>
+          </div>
+        )}
       </section>
     </main>
   );
