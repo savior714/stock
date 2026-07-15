@@ -103,6 +103,33 @@ pub enum SignalSide {
     Upper,
 }
 
+/// Unique key for Bollinger Bands: (period, multiplier).
+/// Uses `f64::to_bits()` for stable hashing of the multiplier.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BollingerKey {
+    pub period: u32,
+    pub multiplier: f64,
+}
+
+impl Eq for BollingerKey {}
+
+impl std::hash::Hash for BollingerKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.period.hash(state);
+        self.multiplier.to_bits().hash(state);
+    }
+}
+
+/// Bollinger Bands value at a single point.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BollingerValue {
+    pub lower: f64,
+    pub middle: f64,
+    pub upper: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanRunStatus {
