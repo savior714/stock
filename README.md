@@ -8,7 +8,7 @@
 
 - 여러 Watchlist와 티커 추가·삭제·일괄 입력
 - Watchlist 프리셋과 Scan 프리셋 분리
-- Yahoo Finance 일봉 데이터 직접 조회 및 로컬 SQLite 저장
+- Yahoo Finance 일봉 데이ㅁ 직접 조회 및 로컬 SQLite 저장
 - Bollinger Bands, RSI, MFI 파라미터 조정
 - 현재 조건 충족 / 신규 진입 감지
 - 단일 조건 / 모든 조건 AND / 하나 이상 OR 결과
