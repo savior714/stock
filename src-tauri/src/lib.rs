@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod domain;
 pub mod error;
+pub mod indicator;
 pub mod repository;
 pub mod state;
 
