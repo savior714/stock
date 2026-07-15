@@ -1,3 +1,7 @@
+pub mod db;
+pub mod domain;
+pub mod error;
+
 #[tauri::command]
 fn health_check() -> &'static str {
     "ok"
