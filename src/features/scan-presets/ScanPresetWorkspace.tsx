@@ -12,7 +12,6 @@ import {
 } from "./api";
 import { emptyPresetForm } from "./defaults";
 import { ScanConditionCard } from "./ScanConditionCard";
-import { useBusy } from "./useBusy";
 import type {
   IndicatorKind,
   ScanConditionDetail,
@@ -99,7 +98,20 @@ export default function ScanPresetWorkspace() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<ScanPresetFormState>(emptyPresetForm());
   const noticeTimerRef = useRef<number | null>(null);
-  const [isBusy, lockBusy, unlockBusy] = useBusy();
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isBusy = isLoadingDetail || isSaving || isDeleting;
+
+  // notice timer cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) {
+        clearTimeout(noticeTimerRef.current);
+      }
+    };
+  }, []);
 
   const clearNotice = useCallback(() => {
     if (noticeTimerRef.current) {
@@ -157,18 +169,18 @@ export default function ScanPresetWorkspace() {
       setError(null);
       setNotice(null);
       setFieldErrors({});
-      lockBusy();
+      setIsLoadingDetail(true);
 
       try {
         const detail = await getScanPreset(id);
         setForm(detailToForm(detail));
       } catch (loadError) {
         setError(errorMessage(loadError));
+      } finally {
+        setIsLoadingDetail(false);
       }
-
-      unlockBusy();
     },
-    [lockBusy, unlockBusy],
+    [],
   );
 
   const startNewPreset = useCallback(() => {
@@ -209,7 +221,7 @@ export default function ScanPresetWorkspace() {
       return;
     }
 
-    lockBusy();
+    setIsSaving(true);
 
     const input = {
       name: form.name.trim(),
@@ -234,10 +246,10 @@ export default function ScanPresetWorkspace() {
       } else {
         setError(msg);
       }
+    } finally {
+      setIsSaving(false);
     }
-
-    unlockBusy();
-  }, [form, isBusy, clearNotice, refreshList, showNotice, lockBusy, unlockBusy]);
+  }, [form, isBusy, clearNotice, refreshList, showNotice]);
 
   const handleDelete = useCallback(async () => {
     if (!form.id || isBusy) return;
@@ -246,7 +258,7 @@ export default function ScanPresetWorkspace() {
       return;
     }
 
-    lockBusy();
+    setIsDeleting(true);
 
     try {
       await deleteScanPreset(form.id);
@@ -255,10 +267,10 @@ export default function ScanPresetWorkspace() {
       showNotice("Preset이 삭제되었습니다.");
     } catch (deleteError) {
       setError(errorMessage(deleteError));
+    } finally {
+      setIsDeleting(false);
     }
-
-    unlockBusy();
-  }, [form, isBusy, refreshList, showNotice, lockBusy, unlockBusy]);
+  }, [form, isBusy, refreshList, showNotice]);
 
   return (
     <div className="scan-preset-layout">
@@ -268,7 +280,12 @@ export default function ScanPresetWorkspace() {
             <p className="eyebrow">Scan conditions</p>
             <h3>Presets</h3>
           </div>
-          <button className="primary-button" type="button" onClick={startNewPreset}>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={startNewPreset}
+            disabled={isBusy}
+          >
             새 Preset
           </button>
         </div>
@@ -313,7 +330,7 @@ export default function ScanPresetWorkspace() {
               className="danger-button"
               type="button"
               onClick={handleDelete}
-              disabled={isBusy}
+              disabled={isBusy || isSaving}
             >
               삭제
             </button>
@@ -359,7 +376,7 @@ export default function ScanPresetWorkspace() {
               className="primary-button strong"
               type="button"
               onClick={handleSave}
-              disabled={isBusy}
+              disabled={isBusy || isDeleting}
             >
               {form.id ? "저장" : "생성"}
             </button>
