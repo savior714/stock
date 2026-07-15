@@ -2,10 +2,10 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { formatAppError, parseAppError } from "@/lib/app-error";
 import {
   createWatchlist,
   deleteWatchlist,
-  errorMessage,
   getWatchlist,
   listWatchlists,
   parseSymbols,
@@ -35,6 +35,7 @@ export default function WatchlistWorkspace() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const symbols = useMemo(() => parseSymbols(form.symbolsText), [form.symbolsText]);
 
@@ -54,7 +55,7 @@ export default function WatchlistWorkspace() {
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(errorMessage(loadError));
+          setError(formatAppError(loadError));
         }
       } finally {
         if (!cancelled) {
@@ -73,12 +74,13 @@ export default function WatchlistWorkspace() {
     setIsLoadingDetail(true);
     setError(null);
     setNotice(null);
+    setFieldErrors({});
 
     try {
       const detail = await getWatchlist(id);
       setForm(detailToForm(detail));
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      setError(formatAppError(loadError));
     } finally {
       setIsLoadingDetail(false);
     }
@@ -88,16 +90,18 @@ export default function WatchlistWorkspace() {
     setForm(emptyWatchlistForm());
     setError(null);
     setNotice(null);
+    setFieldErrors({});
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setNotice(null);
+    setFieldErrors({});
 
     const name = form.name.trim();
     if (!name) {
-      setError("Watchlist 이름을 입력하십시오.");
+      setFieldErrors({ name: "Watchlist 이름을 입력하십시오." });
       return;
     }
 
@@ -116,7 +120,15 @@ export default function WatchlistWorkspace() {
       await refreshList();
       setNotice(form.id ? "Watchlist를 수정했습니다." : "Watchlist를 생성했습니다.");
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      const payload = parseAppError(saveError);
+
+      if (payload.code === "conflict") {
+        setFieldErrors({ name: payload.message });
+      } else if (payload.code === "validation") {
+        setFieldErrors({ name: payload.message });
+      } else {
+        setError(formatAppError(saveError));
+      }
     } finally {
       setIsSaving(false);
     }
@@ -126,20 +138,21 @@ export default function WatchlistWorkspace() {
     if (!form.id) {
       return;
     }
-    if (!window.confirm(`“${form.name}” Watchlist를 삭제하시겠습니까?`)) {
+    if (!window.confirm(`"${form.name}" Watchlist를 삭제하시겠습니까?`)) {
       return;
     }
 
     setIsSaving(true);
     setError(null);
     setNotice(null);
+    setFieldErrors({});
     try {
       await deleteWatchlist(form.id);
       setForm(emptyWatchlistForm());
       await refreshList();
       setNotice("Watchlist를 삭제했습니다.");
     } catch (deleteError) {
-      setError(errorMessage(deleteError));
+      setError(formatAppError(deleteError));
     } finally {
       setIsSaving(false);
     }
@@ -213,6 +226,9 @@ export default function WatchlistWorkspace() {
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
             />
           </label>
+          {fieldErrors.name ? (
+            <div className="field-error">{fieldErrors.name}</div>
+          ) : null}
 
           <label>
             <span>설명</span>

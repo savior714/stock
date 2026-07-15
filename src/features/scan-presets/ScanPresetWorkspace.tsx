@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { errorMessage } from "@/features/watchlists/api";
+import { formatAppError, parseAppError } from "@/lib/app-error";
 import {
   createScanPreset,
   deleteScanPreset,
@@ -134,7 +134,7 @@ export default function ScanPresetWorkspace() {
       const rows = await listScanPresets();
       setPresets(rows);
     } catch (loadError) {
-      setError(errorMessage(loadError));
+      setError(formatAppError(loadError));
     }
   }, []);
 
@@ -149,7 +149,7 @@ export default function ScanPresetWorkspace() {
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(errorMessage(loadError));
+          setError(formatAppError(loadError));
         }
       } finally {
         if (!cancelled) {
@@ -175,7 +175,7 @@ export default function ScanPresetWorkspace() {
         const detail = await getScanPreset(id);
         setForm(detailToForm(detail));
       } catch (loadError) {
-        setError(errorMessage(loadError));
+        setError(formatAppError(loadError));
       } finally {
         setIsLoadingDetail(false);
       }
@@ -237,14 +237,19 @@ export default function ScanPresetWorkspace() {
       await refreshList();
       showNotice(form.id ? "Preset이 저장되었습니다." : "새 Preset이 생성되었습니다.");
     } catch (saveError) {
-      const msg = errorMessage(saveError);
-      const lower = msg.toLowerCase();
-      if (lower.includes("name") || lower.includes("이름") || lower.includes("중복") || lower.includes("exist") || lower.includes("duplicate") || lower.includes("conflict")) {
-        setFieldErrors({ name: msg });
-      } else if (lower.includes("condition") || lower.includes("조건") || lower.includes("활성화") || lower.includes("enabled")) {
-        setFieldErrors({ conditions: msg });
+      const payload = parseAppError(saveError);
+
+      if (payload.code === "conflict") {
+        setFieldErrors({ name: payload.message });
+      } else if (payload.code === "validation") {
+        // Backend validation error — route to relevant field
+        if (payload.detail && payload.detail.toLowerCase().includes("condition")) {
+          setFieldErrors({ conditions: payload.message });
+        } else {
+          setFieldErrors({ name: payload.message });
+        }
       } else {
-        setError(msg);
+        setError(formatAppError(saveError));
       }
     } finally {
       setIsSaving(false);
@@ -266,7 +271,7 @@ export default function ScanPresetWorkspace() {
       await refreshList();
       showNotice("Preset이 삭제되었습니다.");
     } catch (deleteError) {
-      setError(errorMessage(deleteError));
+      setError(formatAppError(deleteError));
     } finally {
       setIsDeleting(false);
     }
