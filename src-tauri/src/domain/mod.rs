@@ -253,7 +253,7 @@ pub struct ScanResult {
     pub indicators: IndicatorValues,
     pub matches: Vec<SignalMatch>,
     pub all_conditions_matched: bool,
-    pub any_conditions_matched: bool,
+    pub any_condition_matched: bool,
     pub data_stale: bool,
 }
 
