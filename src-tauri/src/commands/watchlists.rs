@@ -32,10 +32,7 @@ pub fn list_watchlists(state: State<'_, AppState>) -> AppResult<Vec<WatchlistSum
 }
 
 #[tauri::command]
-pub fn get_watchlist(
-    id: String,
-    state: State<'_, AppState>,
-) -> AppResult<WatchlistDetail> {
+pub fn get_watchlist(id: String, state: State<'_, AppState>) -> AppResult<WatchlistDetail> {
     let id = WatchlistId::new(id)?;
     state.with_database(|database| WatchlistRepository::new(database).get(&id))
 }

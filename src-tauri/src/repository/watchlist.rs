@@ -139,7 +139,9 @@ impl<'connection> WatchlistRepository<'connection> {
     pub fn create(&mut self, input: WatchlistWrite) -> AppResult<WatchlistDetail> {
         let normalized = normalize_write(input)?;
         if self.name_exists(&normalized.name, None)? {
-            return Err(AppError::conflict("a Watchlist with this name already exists"));
+            return Err(AppError::conflict(
+                "a Watchlist with this name already exists",
+            ));
         }
 
         let transaction = self
@@ -154,7 +156,11 @@ impl<'connection> WatchlistRepository<'connection> {
         transaction
             .execute(
                 "INSERT INTO watchlists (id, name, description) VALUES (?1, ?2, ?3)",
-                params![id.0.as_str(), &normalized.name, normalized.description.as_deref()],
+                params![
+                    id.0.as_str(),
+                    &normalized.name,
+                    normalized.description.as_deref()
+                ],
             )
             .map_err(|error| db_error("failed to create Watchlist", error))?;
         replace_members(&transaction, &id, &normalized.symbols)?;
@@ -172,7 +178,9 @@ impl<'connection> WatchlistRepository<'connection> {
     ) -> AppResult<WatchlistDetail> {
         let normalized = normalize_write(input)?;
         if self.name_exists(&normalized.name, Some(id))? {
-            return Err(AppError::conflict("a Watchlist with this name already exists"));
+            return Err(AppError::conflict(
+                "a Watchlist with this name already exists",
+            ));
         }
 
         let transaction = self
@@ -184,7 +192,11 @@ impl<'connection> WatchlistRepository<'connection> {
                 "UPDATE watchlists
                  SET name = ?1, description = ?2, updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?3",
-                params![&normalized.name, normalized.description.as_deref(), id.0.as_str()],
+                params![
+                    &normalized.name,
+                    normalized.description.as_deref(),
+                    id.0.as_str()
+                ],
             )
             .map_err(|error| db_error("failed to update Watchlist", error))?;
         if changed == 0 {
@@ -202,7 +214,10 @@ impl<'connection> WatchlistRepository<'connection> {
     pub fn delete(&mut self, id: &WatchlistId) -> AppResult<()> {
         let changed = self
             .connection
-            .execute("DELETE FROM watchlists WHERE id = ?1", params![id.0.as_str()])
+            .execute(
+                "DELETE FROM watchlists WHERE id = ?1",
+                params![id.0.as_str()],
+            )
             .map_err(|error| db_error("failed to delete Watchlist", error))?;
 
         if changed == 0 {
