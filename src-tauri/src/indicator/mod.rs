@@ -20,6 +20,11 @@ pub struct IndicatorSnapshot {
     pub mfi_by_period: HashMap<u32, Option<f64>>,
     /// Bollinger Bands keyed by (period, multiplier). Only requested params are computed.
     pub bollinger_by_params: HashMap<BollingerKey, Option<BollingerValue>>,
+    // Previous bar values (for cross detection)
+    pub prev_close: Option<f64>,
+    pub prev_rsi_by_period: HashMap<u32, Option<f64>>,
+    pub prev_mfi_by_period: HashMap<u32, Option<f64>>,
+    pub prev_bollinger_by_params: HashMap<BollingerKey, Option<BollingerValue>>,
 }
 
 /// Compute indicator snapshot from daily bars and preset conditions.
@@ -37,8 +42,8 @@ pub fn compute_snapshot(bars: &[DailyBar], preset: &ScanPreset) -> AppResult<Ind
     let len = bars.len();
     let last_idx = len - 1;
 
-    // prev_idx available for cross-mode signal evaluation (used by signal evaluator).
-    let _prev_idx = if len >= 2 { Some(len - 2) } else { None };
+    // prev_idx available for cross-mode signal evaluation.
+    let prev_idx = if len >= 2 { Some(len - 2) } else { None };
 
     // Extract unique parameters from enabled conditions
     let mut rsi_periods: Vec<u32> = Vec::new();
@@ -85,28 +90,46 @@ pub fn compute_snapshot(bars: &[DailyBar], preset: &ScanPreset) -> AppResult<Ind
 
     // Compute RSI
     let mut rsi_by_period: HashMap<u32, Option<f64>> = HashMap::new();
+    let mut prev_rsi_by_period: HashMap<u32, Option<f64>> = HashMap::new();
     for &period in &rsi_periods {
         let output = rsi::calculate_rsi(&closes, period)?;
         let value = extract_value(&output, last_idx);
         rsi_by_period.insert(period, value);
+        if let Some(pi) = prev_idx {
+            let prev_value = extract_value(&output, pi);
+            prev_rsi_by_period.insert(period, prev_value);
+        }
     }
 
     // Compute MFI
     let mut mfi_by_period: HashMap<u32, Option<f64>> = HashMap::new();
+    let mut prev_mfi_by_period: HashMap<u32, Option<f64>> = HashMap::new();
     for &period in &mfi_periods {
         let output = mfi::calculate_mfi(&highs, &lows, &closes, &volumes, period)?;
         let value = extract_value(&output, last_idx);
         mfi_by_period.insert(period, value);
+        if let Some(pi) = prev_idx {
+            let prev_value = extract_value(&output, pi);
+            prev_mfi_by_period.insert(period, prev_value);
+        }
     }
 
     // Compute Bollinger Bands
     let mut bollinger_by_params: HashMap<BollingerKey, Option<BollingerValue>> = HashMap::new();
+    let mut prev_bollinger_by_params: HashMap<BollingerKey, Option<BollingerValue>> =
+        HashMap::new();
     for key in &bollinger_keys {
         let (lower, middle, upper) =
             bollinger::calculate_bollinger(&closes, key.period, key.multiplier)?;
         let value = extract_bollinger(&lower, &middle, &upper, last_idx);
         bollinger_by_params.insert(*key, value);
+        if let Some(pi) = prev_idx {
+            let prev_value = extract_bollinger(&lower, &middle, &upper, pi);
+            prev_bollinger_by_params.insert(*key, prev_value);
+        }
     }
+
+    let prev_close = prev_idx.map(|pi| bars[pi].close);
 
     Ok(IndicatorSnapshot {
         trade_date: bars[last_idx].trade_date.clone(),
@@ -114,6 +137,10 @@ pub fn compute_snapshot(bars: &[DailyBar], preset: &ScanPreset) -> AppResult<Ind
         rsi_by_period,
         mfi_by_period,
         bollinger_by_params,
+        prev_close,
+        prev_rsi_by_period,
+        prev_mfi_by_period,
+        prev_bollinger_by_params,
     })
 }
 
@@ -313,6 +340,13 @@ mod tests {
         assert!(snapshot.rsi_by_period[&14].is_some());
         assert!(snapshot.mfi_by_period.is_empty());
         assert!(snapshot.bollinger_by_params.is_empty());
+
+        // Previous values: prev_close is Some, prev_rsi has period 14
+        assert!(snapshot.prev_close.is_some());
+        assert_eq!(snapshot.prev_close.unwrap(), 118.0);
+        assert!(snapshot.prev_rsi_by_period.contains_key(&14));
+        assert!(snapshot.prev_mfi_by_period.is_empty());
+        assert!(snapshot.prev_bollinger_by_params.is_empty());
     }
 
     #[test]
@@ -326,6 +360,12 @@ mod tests {
         assert!(snapshot.mfi_by_period.contains_key(&14));
         assert!(snapshot.mfi_by_period[&14].is_some());
         assert!(snapshot.bollinger_by_params.is_empty());
+
+        // Previous values
+        assert!(snapshot.prev_close.is_some());
+        assert!(snapshot.prev_mfi_by_period.contains_key(&14));
+        assert!(snapshot.prev_rsi_by_period.is_empty());
+        assert!(snapshot.prev_bollinger_by_params.is_empty());
     }
 
     #[test]
@@ -347,6 +387,12 @@ mod tests {
         // Constant-ish series: all three bands close together
         assert!(val.lower <= val.middle);
         assert!(val.middle <= val.upper);
+
+        // Previous values
+        assert!(snapshot.prev_close.is_some());
+        assert!(snapshot.prev_bollinger_by_params.contains_key(&key));
+        assert!(snapshot.prev_rsi_by_period.is_empty());
+        assert!(snapshot.prev_mfi_by_period.is_empty());
     }
 
     #[test]
@@ -373,6 +419,12 @@ mod tests {
         assert!(snapshot.rsi_by_period[&14].is_some());
         assert!(snapshot.mfi_by_period[&14].is_some());
         assert!(snapshot.bollinger_by_params[&key].is_some());
+
+        // Previous values also populated
+        assert!(snapshot.prev_close.is_some());
+        assert!(snapshot.prev_rsi_by_period.contains_key(&14));
+        assert!(snapshot.prev_mfi_by_period.contains_key(&14));
+        assert!(snapshot.prev_bollinger_by_params.contains_key(&key));
     }
 
     #[test]
@@ -389,6 +441,8 @@ mod tests {
         // Only one entry for period 14
         assert_eq!(snapshot.rsi_by_period.len(), 1);
         assert!(snapshot.rsi_by_period.contains_key(&14));
+        // Same for prev
+        assert_eq!(snapshot.prev_rsi_by_period.len(), 1);
     }
 
     #[test]
@@ -427,6 +481,9 @@ mod tests {
         // Current value (last bar) is Some
         assert!(snapshot.rsi_by_period[&2].is_some());
 
+        // Previous value is also Some (extracted from index 18)
+        assert!(snapshot.prev_rsi_by_period[&2].is_some());
+
         // Verify by re-computing: both prev (18) and current (19) are Some
         let closes: Vec<f64> = bars.iter().map(|b| b.close).collect();
         let output = rsi::calculate_rsi(&closes, 2).unwrap();
@@ -434,6 +491,9 @@ mod tests {
         assert!(output[19].is_some());
         // Oscillating prices produce different RSI at consecutive indices
         assert_ne!(output[18].unwrap(), output[19].unwrap());
+
+        // Snapshot prev value matches index 18
+        assert_eq!(snapshot.prev_rsi_by_period[&2], output[18]);
     }
 
     #[test]
@@ -447,6 +507,7 @@ mod tests {
 
         // Disabled condition's period should not appear
         assert!(snapshot.rsi_by_period.is_empty());
+        assert!(snapshot.prev_rsi_by_period.is_empty());
     }
 
     #[test]
@@ -461,6 +522,10 @@ mod tests {
         assert_eq!(snapshot.close, 100.0);
         // RSI period=2 with only 1 bar: insufficient data, all None
         assert!(snapshot.rsi_by_period[&2].is_none());
+
+        // No previous bar: prev_close is None, prev HashMaps are empty
+        assert!(snapshot.prev_close.is_none());
+        assert!(snapshot.prev_rsi_by_period.is_empty());
     }
 
     #[test]
@@ -493,5 +558,10 @@ mod tests {
         let width1 = v1.upper - v1.lower;
         let width2 = v2.upper - v2.lower;
         assert!(width2 > width1, "multiplier 2.0 band should be wider");
+
+        // Previous values also have two entries
+        assert_eq!(snapshot.prev_bollinger_by_params.len(), 2);
+        assert!(snapshot.prev_bollinger_by_params.contains_key(&key1));
+        assert!(snapshot.prev_bollinger_by_params.contains_key(&key2));
     }
 }
