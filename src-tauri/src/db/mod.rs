@@ -22,20 +22,28 @@ impl Database {
             })?;
         }
 
-        let connection = Connection::open(path)
-            .map_err(|error| AppError::database("failed to open SQLite database", error.to_string()))?;
+        let connection = Connection::open(path).map_err(|error| {
+            AppError::database("failed to open SQLite database", error.to_string())
+        })?;
         Self::initialize(connection)
     }
 
     pub fn open_in_memory() -> AppResult<Self> {
         let connection = Connection::open_in_memory().map_err(|error| {
-            AppError::database("failed to open in-memory SQLite database", error.to_string())
+            AppError::database(
+                "failed to open in-memory SQLite database",
+                error.to_string(),
+            )
         })?;
         Self::initialize(connection)
     }
 
     pub fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    pub(crate) fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.connection
     }
 
     pub fn schema_version(&self) -> AppResult<i64> {
@@ -56,12 +64,19 @@ impl Database {
 
         let current_version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|error| AppError::database("failed to read schema version", error.to_string()))?;
+            .map_err(|error| {
+                AppError::database("failed to read schema version", error.to_string())
+            })?;
 
         match current_version {
-            0 => connection.execute_batch(INITIAL_MIGRATION).map_err(|error| {
-                AppError::database("failed to apply initial SQLite migration", error.to_string())
-            })?,
+            0 => connection
+                .execute_batch(INITIAL_MIGRATION)
+                .map_err(|error| {
+                    AppError::database(
+                        "failed to apply initial SQLite migration",
+                        error.to_string(),
+                    )
+                })?,
             LATEST_SCHEMA_VERSION => {}
             newer => {
                 return Err(AppError::database(

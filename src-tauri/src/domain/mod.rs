@@ -13,7 +13,10 @@ macro_rules! string_id {
             pub fn new(value: impl Into<String>) -> AppResult<Self> {
                 let value = value.into();
                 if value.trim().is_empty() {
-                    return Err(AppError::validation(concat!(stringify!($name), " must not be empty")));
+                    return Err(AppError::validation(concat!(
+                        stringify!($name),
+                        " must not be empty"
+                    )));
                 }
                 Ok(Self(value))
             }
@@ -140,10 +143,16 @@ impl DailyBar {
         }
 
         let prices = [self.open, self.high, self.low, self.close];
-        if prices.iter().any(|price| !price.is_finite() || *price <= 0.0) {
+        if prices
+            .iter()
+            .any(|price| !price.is_finite() || *price <= 0.0)
+        {
             return Err(AppError::new(
                 crate::error::AppErrorCode::InvalidMarketData,
-                format!("{} contains a non-positive or non-finite price", self.symbol),
+                format!(
+                    "{} contains a non-positive or non-finite price",
+                    self.symbol
+                ),
             ));
         }
 
