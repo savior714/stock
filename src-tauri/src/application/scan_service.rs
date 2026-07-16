@@ -10,6 +10,7 @@ use crate::provider::{
 };
 use crate::repository::daily_bar::DailyBarRepository;
 use crate::signal;
+use serde_json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -37,6 +38,179 @@ impl DatabaseOps for Database {
     fn load_bars(&mut self, symbol: &Symbol, start: &str, end: &str) -> AppResult<Vec<DailyBar>> {
         let repo = DailyBarRepository::new(self);
         repo.load_range(symbol, start, end)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ScanRunCreateInput / SequentialScanResult — DTOs for sequential scan orchestration
+// ---------------------------------------------------------------------------
+
+/// Input for creating a scan run.
+pub struct ScanRunCreateInput {
+    pub watchlist_id: crate::domain::WatchlistId,
+    pub preset_id: crate::domain::ScanPresetId,
+    pub total_symbols: u32,
+    pub preset_snapshot_json: String,
+    pub symbols_snapshot_json: String,
+    pub retry_of_run_id: Option<crate::domain::ScanRunId>,
+}
+
+/// Result of a sequential scan run.
+#[derive(Debug)]
+pub struct SequentialScanResult {
+    pub run_id: crate::domain::ScanRunId,
+    pub total_symbols: u32,
+    pub succeeded_symbols: u32,
+    pub failed_symbols: u32,
+    pub base_trade_date: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// DatabaseOpsExtended — extended database operations for scan run orchestration
+// ---------------------------------------------------------------------------
+
+/// Extended database operations for scan run orchestration.
+pub trait DatabaseOpsExtended: DatabaseOps + Send {
+    fn load_watchlist(
+        &mut self,
+        id: &crate::domain::WatchlistId,
+    ) -> AppResult<(Vec<crate::domain::Symbol>, String)>;
+    fn load_preset_conditions(
+        &mut self,
+        id: &crate::domain::ScanPresetId,
+    ) -> AppResult<Vec<crate::domain::SignalCondition>>;
+    fn create_scan_run(
+        &mut self,
+        input: &ScanRunCreateInput,
+    ) -> AppResult<crate::domain::ScanRunId>;
+    fn start_scan_run(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()>;
+    fn save_scan_result(&mut self, result: &crate::domain::ScanResult) -> AppResult<()>;
+    fn save_scan_error(&mut self, error: &crate::domain::ScanError) -> AppResult<()>;
+    fn update_scan_progress(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        succeeded: u32,
+        failed: u32,
+    ) -> AppResult<()>;
+    fn mark_scan_completed(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        base_date: Option<&str>,
+    ) -> AppResult<()>;
+    fn mark_scan_cancelled(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()>;
+    fn mark_scan_failed(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()>;
+    fn update_stale_flags(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        base_date: &str,
+    ) -> AppResult<()>;
+}
+
+impl DatabaseOpsExtended for crate::db::Database {
+    fn load_watchlist(
+        &mut self,
+        id: &crate::domain::WatchlistId,
+    ) -> AppResult<(Vec<crate::domain::Symbol>, String)> {
+        let repo = crate::repository::watchlist::WatchlistRepository::new(self);
+        let detail = repo.get(id)?;
+        Ok((detail.symbols, detail.name))
+    }
+
+    fn load_preset_conditions(
+        &mut self,
+        id: &crate::domain::ScanPresetId,
+    ) -> AppResult<Vec<crate::domain::SignalCondition>> {
+        let repo = crate::repository::scan_preset::ScanPresetRepository::new(self);
+        let detail = repo.get(id)?;
+        Ok(detail
+            .conditions
+            .into_iter()
+            .map(|c| crate::domain::SignalCondition {
+                id: crate::domain::SignalConditionId::new(format!(
+                    "preset-{}-{}",
+                    id.0, c.indicator as u8
+                ))
+                .unwrap(),
+                indicator: c.indicator,
+                side: c.side,
+                period: c.period,
+                threshold: c.threshold,
+                parameters: serde_json::json!({}),
+                trigger_mode: c.trigger_mode,
+                enabled: c.enabled,
+                sort_order: 0,
+            })
+            .collect())
+    }
+
+    fn create_scan_run(
+        &mut self,
+        input: &ScanRunCreateInput,
+    ) -> AppResult<crate::domain::ScanRunId> {
+        let repo_input = crate::repository::scan_run::ScanRunCreate {
+            watchlist_id: input.watchlist_id.clone(),
+            preset_id: input.preset_id.clone(),
+            total_symbols: input.total_symbols,
+            preset_snapshot_json: input.preset_snapshot_json.clone(),
+            symbols_snapshot_json: input.symbols_snapshot_json.clone(),
+            retry_of_run_id: input.retry_of_run_id.clone(),
+        };
+        let mut repo = crate::repository::scan_run::ScanRunRepository::new(self);
+        let summary = repo.create_pending(&repo_input)?;
+        Ok(summary.id)
+    }
+
+    fn start_scan_run(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()> {
+        let mut repo = crate::repository::scan_run::ScanRunRepository::new(self);
+        repo.start_running(id)
+    }
+
+    fn save_scan_result(&mut self, result: &crate::domain::ScanResult) -> AppResult<()> {
+        let mut repo = crate::repository::scan_result::ScanResultRepository::new(self);
+        repo.upsert(result)
+    }
+
+    fn save_scan_error(&mut self, error: &crate::domain::ScanError) -> AppResult<()> {
+        let mut repo = crate::repository::scan_error::ScanErrorRepository::new(self);
+        repo.append(error)
+    }
+
+    fn update_scan_progress(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        succeeded: u32,
+        failed: u32,
+    ) -> AppResult<()> {
+        let mut repo = crate::repository::scan_run::ScanRunRepository::new(self);
+        repo.update_progress(id, succeeded, failed)
+    }
+
+    fn mark_scan_completed(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        base_date: Option<&str>,
+    ) -> AppResult<()> {
+        let mut repo = crate::repository::scan_run::ScanRunRepository::new(self);
+        repo.mark_completed(id, base_date)
+    }
+
+    fn mark_scan_cancelled(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()> {
+        let mut repo = crate::repository::scan_run::ScanRunRepository::new(self);
+        repo.mark_cancelled(id)
+    }
+
+    fn mark_scan_failed(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()> {
+        let mut repo = crate::repository::scan_run::ScanRunRepository::new(self);
+        repo.mark_failed(id)
+    }
+
+    fn update_stale_flags(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        base_date: &str,
+    ) -> AppResult<()> {
+        let mut repo = crate::repository::scan_result::ScanResultRepository::new(self);
+        repo.update_stale_flags(id, base_date)
     }
 }
 
@@ -270,6 +444,183 @@ where
     }
 }
 
+impl<P> ScanService<P>
+where
+    P: MarketDataProvider,
+{
+    /// Run a sequential scan across all symbols in a watchlist.
+    ///
+    /// Flow:
+    /// 1. Load watchlist and preset conditions
+    /// 2. Create pending run record with snapshots
+    /// 3. Transition to running
+    /// 4. Process each symbol sequentially (success -> save result, error -> save error)
+    /// 5. Update progress after each symbol
+    /// 6. Calculate base_trade_date from successful results
+    /// 7. Update stale flags
+    /// 8. Mark as completed (or failed if all symbols failed)
+    pub async fn run_scan_sequential(
+        &self,
+        watchlist_id: &crate::domain::WatchlistId,
+        preset_id: &crate::domain::ScanPresetId,
+        db: &mut dyn DatabaseOpsExtended,
+    ) -> AppResult<SequentialScanResult> {
+        // 1. Load watchlist and preset
+        let (symbols, _watchlist_name) = db.load_watchlist(watchlist_id)?;
+        let conditions = db.load_preset_conditions(preset_id)?;
+
+        let total = symbols.len() as u32;
+        if total == 0 {
+            return Err(AppError::validation("watchlist has no symbols"));
+        }
+
+        // 2. Create snapshots
+        let preset_snapshot = self.build_preset_snapshot(preset_id, &conditions);
+        let symbols_snapshot = self.build_symbols_snapshot(&symbols);
+
+        // 3. Create pending run
+        let run_input = ScanRunCreateInput {
+            watchlist_id: watchlist_id.clone(),
+            preset_id: preset_id.clone(),
+            total_symbols: total,
+            preset_snapshot_json: preset_snapshot,
+            symbols_snapshot_json: symbols_snapshot,
+            retry_of_run_id: None,
+        };
+        let run_id = db.create_scan_run(&run_input)?;
+
+        // 4. Start running
+        db.start_scan_run(&run_id)?;
+
+        // 5. Process symbols sequentially
+        let mut succeeded: u32 = 0;
+        let mut failed: u32 = 0;
+        let mut latest_trade_date: Option<String> = None;
+
+        for symbol in &symbols {
+            // Check cancellation before each symbol
+            if self.is_cancelled().await {
+                db.mark_scan_cancelled(&run_id)?;
+                db.update_scan_progress(&run_id, succeeded, failed)?;
+                return Ok(SequentialScanResult {
+                    run_id,
+                    total_symbols: total,
+                    succeeded_symbols: succeeded,
+                    failed_symbols: failed,
+                    base_trade_date: None,
+                });
+            }
+
+            // Process the symbol
+            let preset_for_symbol = crate::domain::ScanPreset {
+                id: preset_id.clone(),
+                name: String::new(),
+                conditions: conditions.clone(),
+            };
+
+            match self
+                .process_single_symbol(symbol.clone(), &preset_for_symbol, &run_id, db)
+                .await
+            {
+                Ok(result) => {
+                    db.save_scan_result(&result)?;
+                    succeeded += 1;
+
+                    if let Some(ref current) = latest_trade_date {
+                        if result.trade_date > *current {
+                            latest_trade_date = Some(result.trade_date.clone());
+                        }
+                    } else {
+                        latest_trade_date = Some(result.trade_date.clone());
+                    }
+                }
+                Err(error) => {
+                    let scan_error = crate::domain::ScanError {
+                        run_id: run_id.clone(),
+                        symbol: Some(symbol.as_str().to_string()),
+                        code: format!("{:?}", error.code),
+                        message: error.message.clone(),
+                        detail: error.detail.clone(),
+                        retryable: error.retryable,
+                        attempt: 1,
+                    };
+                    db.save_scan_error(&scan_error)?;
+                    failed += 1;
+                }
+            }
+
+            // Update progress after each symbol
+            db.update_scan_progress(&run_id, succeeded, failed)?;
+        }
+
+        // 6. Update stale flags
+        if let Some(ref date) = latest_trade_date {
+            let _ = db.update_stale_flags(&run_id, date);
+        }
+
+        // 7. Mark as completed or failed
+        if failed == total {
+            db.mark_scan_failed(&run_id)?;
+        } else {
+            db.mark_scan_completed(&run_id, latest_trade_date.as_deref())?;
+        }
+
+        // 8. Final progress update
+        db.update_scan_progress(&run_id, succeeded, failed)?;
+
+        Ok(SequentialScanResult {
+            run_id,
+            total_symbols: total,
+            succeeded_symbols: succeeded,
+            failed_symbols: failed,
+            base_trade_date: latest_trade_date,
+        })
+    }
+
+    /// Check if the scan has been cancelled.
+    async fn is_cancelled(&self) -> bool {
+        let token = self.cancellation.lock().await;
+        token.is_cancelled()
+    }
+
+    fn build_preset_snapshot(
+        &self,
+        preset_id: &crate::domain::ScanPresetId,
+        conditions: &[crate::domain::SignalCondition],
+    ) -> String {
+        let snapshot = serde_json::json!({
+            "id": preset_id.0,
+            "conditions": conditions.iter().map(|c| {
+                serde_json::json!({
+                    "id": c.id.0,
+                    "indicator": match c.indicator {
+                        crate::domain::IndicatorKind::Rsi => "rsi",
+                        crate::domain::IndicatorKind::Mfi => "mfi",
+                        crate::domain::IndicatorKind::Bollinger => "bollinger",
+                    },
+                    "side": match c.side {
+                        crate::domain::SignalSide::Lower => "lower",
+                        crate::domain::SignalSide::Upper => "upper",
+                    },
+                    "period": c.period,
+                    "threshold": c.threshold,
+                    "trigger_mode": match c.trigger_mode {
+                        crate::domain::TriggerMode::Current => "current",
+                        crate::domain::TriggerMode::Cross => "cross",
+                    },
+                    "enabled": c.enabled,
+                })
+            }).collect::<Vec<_>>(),
+        });
+        serde_json::to_string(&snapshot).unwrap_or_default()
+    }
+
+    fn build_symbols_snapshot(&self, symbols: &[crate::domain::Symbol]) -> String {
+        let list: Vec<&str> = symbols.iter().map(|s| s.as_str()).collect();
+        serde_json::to_string(&list).unwrap_or_default()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -285,13 +636,13 @@ mod tests {
 
     // ---- Fake provider ----
 
-    struct FakeProvider {
+    pub struct FakeProvider {
         bars: Vec<DailyBar>,
         error: Option<AppError>,
     }
 
     impl FakeProvider {
-        fn new(bars: Vec<DailyBar>) -> Self {
+        pub fn new(bars: Vec<DailyBar>) -> Self {
             Self { bars, error: None }
         }
 
@@ -620,5 +971,391 @@ mod tests {
         // any_condition_matched depends on RSI value vs threshold
         // The aggregate should be consistent with matches
         assert!(!scan_result.matches.is_empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sequential scan tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod sequential_tests {
+    use super::tests::FakeProvider;
+    use super::*;
+    use crate::domain::{
+        IndicatorKind, PriceBasis, ScanPresetId, SignalCondition, SignalConditionId, SignalSide,
+        TriggerMode, WatchlistId,
+    };
+    use serde_json::json;
+
+    struct SequentialFakeDatabaseOps {
+        symbols: Vec<crate::domain::Symbol>,
+        conditions: Vec<SignalCondition>,
+        created_run_id: Option<crate::domain::ScanRunId>,
+        saved_results: std::cell::RefCell<Vec<crate::domain::ScanResult>>,
+        saved_errors: std::cell::RefCell<Vec<crate::domain::ScanError>>,
+        mark_completed_date: std::cell::RefCell<Option<String>>,
+        mark_failed_called: std::cell::RefCell<bool>,
+    }
+
+    impl SequentialFakeDatabaseOps {
+        fn new(symbols: Vec<crate::domain::Symbol>, conditions: Vec<SignalCondition>) -> Self {
+            Self {
+                symbols,
+                conditions,
+                created_run_id: None,
+                saved_results: std::cell::RefCell::new(Vec::new()),
+                saved_errors: std::cell::RefCell::new(Vec::new()),
+                mark_completed_date: std::cell::RefCell::new(None),
+                mark_failed_called: std::cell::RefCell::new(false),
+            }
+        }
+
+        fn saved_results(&self) -> Vec<crate::domain::ScanResult> {
+            self.saved_results.borrow().clone()
+        }
+
+        fn saved_errors(&self) -> Vec<crate::domain::ScanError> {
+            self.saved_errors.borrow().clone()
+        }
+
+        fn mark_failed_called(&self) -> bool {
+            *self.mark_failed_called.borrow()
+        }
+    }
+
+    impl DatabaseOps for SequentialFakeDatabaseOps {
+        fn date_range(
+            &mut self,
+            _symbol: &crate::domain::Symbol,
+        ) -> AppResult<Option<(String, String)>> {
+            Ok(None)
+        }
+
+        fn upsert_bars(&mut self, _bars: &[DailyBar]) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn load_bars(
+            &mut self,
+            _symbol: &crate::domain::Symbol,
+            _start: &str,
+            _end: &str,
+        ) -> AppResult<Vec<DailyBar>> {
+            Ok((0..20)
+                .map(|i| DailyBar {
+                    symbol: crate::domain::Symbol::new("AAPL").unwrap(),
+                    trade_date: format!("2026-07-{:02}", i + 1),
+                    price_basis: PriceBasis::SplitAdjusted,
+                    open: 100.0 + i as f64,
+                    high: 101.0 + i as f64,
+                    low: 99.0 + i as f64,
+                    close: 100.0 + i as f64,
+                    volume: 1_000,
+                })
+                .collect())
+        }
+    }
+
+    impl DatabaseOpsExtended for SequentialFakeDatabaseOps {
+        fn load_watchlist(
+            &mut self,
+            _id: &WatchlistId,
+        ) -> AppResult<(Vec<crate::domain::Symbol>, String)> {
+            Ok((self.symbols.clone(), "Test Watchlist".to_string()))
+        }
+
+        fn load_preset_conditions(
+            &mut self,
+            _id: &ScanPresetId,
+        ) -> AppResult<Vec<SignalCondition>> {
+            Ok(self.conditions.clone())
+        }
+
+        fn create_scan_run(
+            &mut self,
+            input: &ScanRunCreateInput,
+        ) -> AppResult<crate::domain::ScanRunId> {
+            let id =
+                crate::domain::ScanRunId::new(format!("run-{}", input.watchlist_id.0)).unwrap();
+            self.created_run_id = Some(id.clone());
+            Ok(id)
+        }
+
+        fn start_scan_run(&mut self, _id: &crate::domain::ScanRunId) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn save_scan_result(&mut self, result: &crate::domain::ScanResult) -> AppResult<()> {
+            self.saved_results.borrow_mut().push(result.clone());
+            Ok(())
+        }
+
+        fn save_scan_error(&mut self, error: &crate::domain::ScanError) -> AppResult<()> {
+            self.saved_errors.borrow_mut().push(error.clone());
+            Ok(())
+        }
+
+        fn update_scan_progress(
+            &mut self,
+            _id: &crate::domain::ScanRunId,
+            _succeeded: u32,
+            _failed: u32,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn mark_scan_completed(
+            &mut self,
+            _id: &crate::domain::ScanRunId,
+            base_date: Option<&str>,
+        ) -> AppResult<()> {
+            self.mark_completed_date
+                .borrow_mut()
+                .clone_from(&base_date.map(|s| s.to_string()));
+            Ok(())
+        }
+
+        fn mark_scan_cancelled(&mut self, _id: &crate::domain::ScanRunId) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn mark_scan_failed(&mut self, _id: &crate::domain::ScanRunId) -> AppResult<()> {
+            *self.mark_failed_called.borrow_mut() = true;
+            Ok(())
+        }
+
+        fn update_stale_flags(
+            &mut self,
+            _id: &crate::domain::ScanRunId,
+            _base_date: &str,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+    }
+
+    fn make_rsi_condition(period: u32, threshold: f64) -> SignalCondition {
+        SignalCondition {
+            id: SignalConditionId::new("rsi1").unwrap(),
+            indicator: IndicatorKind::Rsi,
+            side: SignalSide::Lower,
+            period,
+            threshold: Some(threshold),
+            parameters: json!({}),
+            trigger_mode: TriggerMode::Current,
+            enabled: true,
+            sort_order: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn sequential_scan_completes_all_symbols() {
+        let symbols = vec![
+            crate::domain::Symbol::new("AAPL").unwrap(),
+            crate::domain::Symbol::new("GOOGL").unwrap(),
+            crate::domain::Symbol::new("MSFT").unwrap(),
+        ];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = FakeProvider::new(
+            (0..20)
+                .map(|i| DailyBar {
+                    symbol: crate::domain::Symbol::new("AAPL").unwrap(),
+                    trade_date: format!("2026-07-{:02}", i + 1),
+                    price_basis: PriceBasis::SplitAdjusted,
+                    open: 100.0 + i as f64,
+                    high: 101.0 + i as f64,
+                    low: 99.0 + i as f64,
+                    close: 100.0 + i as f64,
+                    volume: 1_000,
+                })
+                .collect(),
+        );
+        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let service = ScanService::new(provider, cancellation);
+
+        let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-1").unwrap();
+        let preset_id = ScanPresetId::new("ps-1").unwrap();
+
+        let result = service
+            .run_scan_sequential(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_symbols, 3);
+        assert_eq!(scan_result.succeeded_symbols, 3);
+        assert_eq!(scan_result.failed_symbols, 0);
+        assert!(scan_result.base_trade_date.is_some());
+        assert_eq!(db.saved_results().len(), 3);
+        assert!(db.saved_errors().is_empty());
+    }
+
+    #[tokio::test]
+    async fn single_symbol_failure_does_not_stop_run() {
+        struct FailingProvider {
+            fail_on: Vec<String>,
+        }
+
+        #[async_trait::async_trait]
+        impl MarketDataProvider for FailingProvider {
+            async fn fetch_daily_bars(
+                &self,
+                symbol: &crate::domain::Symbol,
+                _range: &DateRange,
+            ) -> AppResult<Vec<DailyBar>> {
+                if self.fail_on.contains(&symbol.as_str().to_string()) {
+                    return Err(AppError::new(
+                        AppErrorCode::ProviderUnavailable,
+                        format!("failed for {}", symbol),
+                    )
+                    .retryable(true));
+                }
+                Ok((0..20)
+                    .map(|i| DailyBar {
+                        symbol: symbol.clone(),
+                        trade_date: format!("2026-07-{:02}", i + 1),
+                        price_basis: PriceBasis::SplitAdjusted,
+                        open: 100.0 + i as f64,
+                        high: 101.0 + i as f64,
+                        low: 99.0 + i as f64,
+                        close: 100.0 + i as f64,
+                        volume: 1_000,
+                    })
+                    .collect())
+            }
+        }
+
+        let symbols = vec![
+            crate::domain::Symbol::new("AAPL").unwrap(),
+            crate::domain::Symbol::new("GOOGL").unwrap(),
+            crate::domain::Symbol::new("MSFT").unwrap(),
+        ];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = FailingProvider {
+            fail_on: vec!["GOOGL".to_string()],
+        };
+        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let service = ScanService::new(provider, cancellation);
+
+        let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-2").unwrap();
+        let preset_id = ScanPresetId::new("ps-2").unwrap();
+
+        let result = service
+            .run_scan_sequential(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_symbols, 3);
+        assert_eq!(scan_result.succeeded_symbols, 2);
+        assert_eq!(scan_result.failed_symbols, 1);
+        assert_eq!(db.saved_results().len(), 2);
+        assert_eq!(db.saved_errors().len(), 1);
+        let error = &db.saved_errors()[0];
+        assert_eq!(error.symbol.as_deref(), Some("GOOGL"));
+        assert!(error.retryable);
+    }
+
+    #[tokio::test]
+    async fn all_symbols_failed_marks_run_as_failed() {
+        struct AlwaysFailingProvider;
+
+        #[async_trait::async_trait]
+        impl MarketDataProvider for AlwaysFailingProvider {
+            async fn fetch_daily_bars(
+                &self,
+                symbol: &crate::domain::Symbol,
+                _range: &DateRange,
+            ) -> AppResult<Vec<DailyBar>> {
+                Err(AppError::new(
+                    AppErrorCode::ProviderUnavailable,
+                    format!("network error for {}", symbol),
+                )
+                .retryable(true))
+            }
+        }
+
+        let symbols = vec![
+            crate::domain::Symbol::new("AAPL").unwrap(),
+            crate::domain::Symbol::new("GOOGL").unwrap(),
+        ];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = AlwaysFailingProvider;
+        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let service = ScanService::new(provider, cancellation);
+
+        let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-3").unwrap();
+        let preset_id = ScanPresetId::new("ps-3").unwrap();
+
+        let _ = service
+            .run_scan_sequential(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert_eq!(db.saved_results().len(), 0);
+        assert_eq!(db.saved_errors().len(), 2);
+        assert!(db.mark_failed_called());
+    }
+
+    #[tokio::test]
+    async fn progress_counts_match_total() {
+        let symbols = vec![
+            crate::domain::Symbol::new("AAPL").unwrap(),
+            crate::domain::Symbol::new("GOOGL").unwrap(),
+        ];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = FakeProvider::new(
+            (0..20)
+                .map(|i| DailyBar {
+                    symbol: crate::domain::Symbol::new("AAPL").unwrap(),
+                    trade_date: format!("2026-07-{:02}", i + 1),
+                    price_basis: PriceBasis::SplitAdjusted,
+                    open: 100.0 + i as f64,
+                    high: 101.0 + i as f64,
+                    low: 99.0 + i as f64,
+                    close: 100.0 + i as f64,
+                    volume: 1_000,
+                })
+                .collect(),
+        );
+        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let service = ScanService::new(provider, cancellation);
+
+        let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-4").unwrap();
+        let preset_id = ScanPresetId::new("ps-4").unwrap();
+
+        let result = service
+            .run_scan_sequential(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(
+            scan_result.succeeded_symbols + scan_result.failed_symbols,
+            scan_result.total_symbols
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_watchlist_returns_error() {
+        let symbols: Vec<crate::domain::Symbol> = vec![];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = FakeProvider::new(vec![]);
+        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let service = ScanService::new(provider, cancellation);
+
+        let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-5").unwrap();
+        let preset_id = ScanPresetId::new("ps-5").unwrap();
+
+        let result = service
+            .run_scan_sequential(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, AppErrorCode::Validation);
     }
 }
