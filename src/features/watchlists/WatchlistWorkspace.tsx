@@ -37,6 +37,7 @@ export default function WatchlistWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const detailRequestRef = useRef(0);
+  const operationRef = useRef(false);
 
   const symbols = useMemo(() => parseSymbols(form.symbolsText), [form.symbolsText]);
   const isBusy = isLoadingDetail || isSaving;
@@ -69,43 +70,43 @@ export default function WatchlistWorkspace() {
     void load();
     return () => {
       cancelled = true;
+      operationRef.current = false;
       detailRequestRef.current += 1;
     };
   }, []);
 
-  const selectWatchlist = useCallback(
-    async (id: string) => {
-      if (isBusy) {
-        return;
-      }
+  const selectWatchlist = useCallback(async (id: string) => {
+    if (operationRef.current) {
+      return;
+    }
 
-      const requestId = detailRequestRef.current + 1;
-      detailRequestRef.current = requestId;
-      setIsLoadingDetail(true);
-      setError(null);
-      setNotice(null);
-      setFieldErrors({});
+    operationRef.current = true;
+    const requestId = detailRequestRef.current + 1;
+    detailRequestRef.current = requestId;
+    setIsLoadingDetail(true);
+    setError(null);
+    setNotice(null);
+    setFieldErrors({});
 
-      try {
-        const detail = await getWatchlist(id);
-        if (detailRequestRef.current === requestId) {
-          setForm(detailToForm(detail));
-        }
-      } catch (loadError) {
-        if (detailRequestRef.current === requestId) {
-          setError(formatAppError(loadError));
-        }
-      } finally {
-        if (detailRequestRef.current === requestId) {
-          setIsLoadingDetail(false);
-        }
+    try {
+      const detail = await getWatchlist(id);
+      if (detailRequestRef.current === requestId) {
+        setForm(detailToForm(detail));
       }
-    },
-    [isBusy],
-  );
+    } catch (loadError) {
+      if (detailRequestRef.current === requestId) {
+        setError(formatAppError(loadError));
+      }
+    } finally {
+      operationRef.current = false;
+      if (detailRequestRef.current === requestId) {
+        setIsLoadingDetail(false);
+      }
+    }
+  }, []);
 
   const startNewWatchlist = useCallback(() => {
-    if (isBusy) {
+    if (operationRef.current) {
       return;
     }
 
@@ -114,11 +115,11 @@ export default function WatchlistWorkspace() {
     setError(null);
     setNotice(null);
     setFieldErrors({});
-  }, [isBusy]);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isBusy) {
+    if (operationRef.current) {
       return;
     }
 
@@ -132,6 +133,7 @@ export default function WatchlistWorkspace() {
       return;
     }
 
+    operationRef.current = true;
     setIsSaving(true);
     try {
       const input = {
@@ -155,18 +157,20 @@ export default function WatchlistWorkspace() {
         setError(formatAppError(saveError));
       }
     } finally {
+      operationRef.current = false;
       setIsSaving(false);
     }
   }
 
   async function removeSelected() {
-    if (!form.id || isBusy) {
+    if (!form.id || operationRef.current) {
       return;
     }
     if (!window.confirm(`"${form.name}" Watchlist를 삭제하시겠습니까?`)) {
       return;
     }
 
+    operationRef.current = true;
     setIsSaving(true);
     setError(null);
     setNotice(null);
@@ -179,6 +183,7 @@ export default function WatchlistWorkspace() {
     } catch (deleteError) {
       setError(formatAppError(deleteError));
     } finally {
+      operationRef.current = false;
       setIsSaving(false);
     }
   }
