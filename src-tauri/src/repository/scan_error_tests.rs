@@ -46,7 +46,7 @@ fn insert_scan_run(database: &mut Database) -> ScanRunId {
 fn make_error(run_id: &ScanRunId, symbol: Option<&str>, code: &str, retryable: bool) -> ScanError {
     ScanError {
         run_id: run_id.clone(),
-        symbol: symbol.map(|s| s.to_string()),
+        symbol: symbol.map(str::to_string),
         code: code.to_string(),
         message: "test error".to_string(),
         detail: None,
@@ -83,13 +83,13 @@ fn multiple_errors_for_same_symbol() {
     let run_id = insert_scan_run(&mut database);
     let mut repo = ScanErrorRepository::new(&mut database);
 
-    let mut e1 = make_error(&run_id, Some("AAPL"), "rate_limited", true);
-    e1.attempt = 1;
-    repo.append(&e1).expect("ok");
+    let mut first = make_error(&run_id, Some("AAPL"), "rate_limited", true);
+    first.attempt = 1;
+    repo.append(&first).expect("ok");
 
-    let mut e2 = make_error(&run_id, Some("AAPL"), "rate_limited", true);
-    e2.attempt = 2;
-    repo.append(&e2).expect("ok");
+    let mut second = make_error(&run_id, Some("AAPL"), "rate_limited", true);
+    second.attempt = 2;
+    repo.append(&second).expect("ok");
 
     let errors = repo.get_by_run(&run_id).expect("ok");
     assert_eq!(errors.len(), 2);
@@ -111,9 +111,25 @@ fn returns_retryable_symbols() {
         .expect("ok");
 
     let symbols = repo.get_retryable_symbols(&run_id).expect("ok");
-    assert_eq!(symbols.len(), 2);
-    assert_eq!(symbols[0], "AAPL");
-    assert_eq!(symbols[1], "MSFT");
+    assert_eq!(symbols, vec!["AAPL", "MSFT"]);
+}
+
+#[test]
+fn retryable_run_level_error_is_not_a_symbol_target() {
+    let mut database = make_database();
+    let run_id = insert_scan_run(&mut database);
+    let mut repo = ScanErrorRepository::new(&mut database);
+
+    repo.append(&make_error(&run_id, None, "provider_unavailable", true))
+        .expect("run-level error must append");
+    repo.append(&make_error(&run_id, Some("AAPL"), "rate_limited", true))
+        .expect("symbol error must append");
+
+    assert_eq!(
+        repo.get_retryable_symbols(&run_id).expect("query must succeed"),
+        vec!["AAPL"]
+    );
+    assert_eq!(repo.count_retryable(&run_id).expect("count must succeed"), 1);
 }
 
 #[test]
@@ -122,21 +138,20 @@ fn counts_retryable_symbols() {
     let run_id = insert_scan_run(&mut database);
     let mut repo = ScanErrorRepository::new(&mut database);
 
-    let mut e1 = make_error(&run_id, Some("AAPL"), "rate_limited", true);
-    e1.attempt = 1;
-    repo.append(&e1).expect("ok");
+    let mut first = make_error(&run_id, Some("AAPL"), "rate_limited", true);
+    first.attempt = 1;
+    repo.append(&first).expect("ok");
 
-    let mut e2 = make_error(&run_id, Some("AAPL"), "rate_limited", true);
-    e2.attempt = 2;
-    repo.append(&e2).expect("ok");
+    let mut second = make_error(&run_id, Some("AAPL"), "rate_limited", true);
+    second.attempt = 2;
+    repo.append(&second).expect("ok");
 
     repo.append(&make_error(&run_id, Some("MSFT"), "rate_limited", true))
         .expect("ok");
     repo.append(&make_error(&run_id, Some("GOOGL"), "invalid_data", false))
         .expect("ok");
 
-    let count = repo.count_retryable(&run_id).expect("ok");
-    assert_eq!(count, 2); // AAPL and MSFT (distinct)
+    assert_eq!(repo.count_retryable(&run_id).expect("ok"), 2);
 }
 
 #[test]
@@ -183,8 +198,7 @@ fn empty_run_returns_no_errors() {
     let run_id = insert_scan_run(&mut database);
     let repo = ScanErrorRepository::new(&mut database);
 
-    let errors = repo.get_by_run(&run_id).expect("ok");
-    assert!(errors.is_empty());
+    assert!(repo.get_by_run(&run_id).expect("ok").is_empty());
 }
 
 #[test]
