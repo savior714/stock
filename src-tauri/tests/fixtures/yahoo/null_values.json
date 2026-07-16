@@ -1,0 +1,34 @@
+{
+  "chart": {
+    "result": [
+      {
+        "meta": {
+          "currency": "USD",
+          "symbol": "TEST",
+          "regularMarketPrice": 50.0,
+          "chartPreviousClose": 49.0,
+          "dataGranularity": "1d",
+          "rangeSeconds": 86400
+        },
+        "timestamp": [1719792000, 1719878400, 1719964800, 1720051200, 1720137600],
+        "indicators": {
+          "quote": [
+            {
+              "open": [48.0, null, 50.0, 49.0, 51.0],
+              "high": [49.5, null, 51.5, 50.5, 52.5],
+              "low": [47.5, null, 49.5, 48.5, 50.5],
+              "close": [49.0, null, 51.0, 49.5, 52.0],
+              "volume": [1000000, null, 1200000, 1100000, 1300000]
+            }
+          ],
+          "adjclose": [
+            {
+              "adjclose": [48.8, null, 50.8, 49.3, 51.8]
+            }
+          ]
+        }
+      }
+    ],
+    "error": null
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "chart": {
+    "result": null,
+    "error": {
+      "code": "No data found",
+      "description": "No such symbol. The symbol may be delisted or incorrect."
+    }
+  }
+}

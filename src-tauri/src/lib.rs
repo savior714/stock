@@ -3,6 +3,7 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod indicator;
+pub mod provider;
 pub mod repository;
 pub mod signal;
 pub mod state;
