@@ -83,6 +83,7 @@ enum ComputeResult {
 }
 
 /// Result of a concurrent scan run.
+#[derive(Debug)]
 pub struct ConcurrentScanResult {
     pub run_id: crate::domain::ScanRunId,
     pub total_symbols: u32,
@@ -237,6 +238,103 @@ impl DatabaseOpsExtended for crate::db::Database {
     ) -> AppResult<()> {
         let mut repo = crate::repository::scan_result::ScanResultRepository::new(self);
         repo.update_stale_flags(id, base_date)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ScanDbOpsWrapper — thin wrapper around &mut Database for use in spawn_blocking
+// ---------------------------------------------------------------------------
+
+/// Wraps `&mut Database` to implement `DatabaseOpsExtended`.
+/// Used inside `spawn_blocking` closures so that DB operations
+/// acquire the mutex only for the duration of each blocking call.
+pub struct ScanDbOpsWrapper<'a>(&'a mut Database);
+
+impl<'a> ScanDbOpsWrapper<'a> {
+    pub fn new(db: &'a mut Database) -> Self {
+        Self(db)
+    }
+}
+
+impl<'a> DatabaseOps for ScanDbOpsWrapper<'a> {
+    fn date_range(&mut self, symbol: &Symbol) -> AppResult<Option<(String, String)>> {
+        DatabaseOps::date_range(self.0, symbol)
+    }
+
+    fn upsert_bars(&mut self, bars: &[DailyBar]) -> AppResult<()> {
+        DatabaseOps::upsert_bars(self.0, bars)
+    }
+
+    fn load_bars(&mut self, symbol: &Symbol, start: &str, end: &str) -> AppResult<Vec<DailyBar>> {
+        DatabaseOps::load_bars(self.0, symbol, start, end)
+    }
+}
+
+impl<'a> DatabaseOpsExtended for ScanDbOpsWrapper<'a> {
+    fn load_watchlist(
+        &mut self,
+        id: &crate::domain::WatchlistId,
+    ) -> AppResult<(Vec<crate::domain::Symbol>, String)> {
+        DatabaseOpsExtended::load_watchlist(self.0, id)
+    }
+
+    fn load_preset_conditions(
+        &mut self,
+        id: &crate::domain::ScanPresetId,
+    ) -> AppResult<Vec<crate::domain::SignalCondition>> {
+        DatabaseOpsExtended::load_preset_conditions(self.0, id)
+    }
+
+    fn create_scan_run(
+        &mut self,
+        input: &ScanRunCreateInput,
+    ) -> AppResult<crate::domain::ScanRunId> {
+        DatabaseOpsExtended::create_scan_run(self.0, input)
+    }
+
+    fn start_scan_run(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()> {
+        DatabaseOpsExtended::start_scan_run(self.0, id)
+    }
+
+    fn save_scan_result(&mut self, result: &crate::domain::ScanResult) -> AppResult<()> {
+        DatabaseOpsExtended::save_scan_result(self.0, result)
+    }
+
+    fn save_scan_error(&mut self, error: &crate::domain::ScanError) -> AppResult<()> {
+        DatabaseOpsExtended::save_scan_error(self.0, error)
+    }
+
+    fn update_scan_progress(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        succeeded: u32,
+        failed: u32,
+    ) -> AppResult<()> {
+        DatabaseOpsExtended::update_scan_progress(self.0, id, succeeded, failed)
+    }
+
+    fn mark_scan_completed(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        base_date: Option<&str>,
+    ) -> AppResult<()> {
+        DatabaseOpsExtended::mark_scan_completed(self.0, id, base_date)
+    }
+
+    fn mark_scan_cancelled(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()> {
+        DatabaseOpsExtended::mark_scan_cancelled(self.0, id)
+    }
+
+    fn mark_scan_failed(&mut self, id: &crate::domain::ScanRunId) -> AppResult<()> {
+        DatabaseOpsExtended::mark_scan_failed(self.0, id)
+    }
+
+    fn update_stale_flags(
+        &mut self,
+        id: &crate::domain::ScanRunId,
+        base_date: &str,
+    ) -> AppResult<()> {
+        DatabaseOpsExtended::update_stale_flags(self.0, id, base_date)
     }
 }
 
@@ -500,8 +598,8 @@ where
             watchlist_id: watchlist_id.clone(),
             preset_id: preset_id.clone(),
             total_symbols: total,
-            preset_snapshot_json: preset_snapshot,
-            symbols_snapshot_json: symbols_snapshot,
+            preset_snapshot_json: preset_snapshot.clone(),
+            symbols_snapshot_json: symbols_snapshot.clone(),
             retry_of_run_id: None,
         };
         let run_id = db.create_scan_run(&run_input)?;
@@ -643,19 +741,28 @@ where
 
     /// Run a concurrent scan across all symbols with bounded concurrency (4).
     ///
-    /// Symbols are processed concurrently. DB operations (upsert, load, save)
-    /// are performed by the main task to avoid holding DB locks during network I/O.
+    /// Symbols are processed concurrently. DB operations are performed via
+    /// `spawn_blocking` to avoid holding the DB mutex across async await points.
+    /// Task panics are caught and treated as symbol errors.
+    /// Cancellation prevents new symbol tasks from starting.
+    /// Run a concurrent scan across all symbols with bounded concurrency (4).
+    ///
+    /// Symbols are processed concurrently. DB operations are performed via
+    /// `spawn_blocking` to avoid holding the DB mutex across async await points.
     /// Task panics are caught and treated as symbol errors.
     /// Cancellation prevents new symbol tasks from starting.
     pub async fn run_scan_concurrent(
         &self,
         watchlist_id: &crate::domain::WatchlistId,
         preset_id: &crate::domain::ScanPresetId,
-        db: &mut dyn DatabaseOpsExtended,
+        ops: &mut dyn DatabaseOpsExtended,
     ) -> AppResult<ConcurrentScanResult> {
+        let watchlist_id = watchlist_id.clone();
+        let preset_id = preset_id.clone();
+
         // 1. Load watchlist and preset
-        let (symbols, _watchlist_name) = db.load_watchlist(watchlist_id)?;
-        let conditions = db.load_preset_conditions(preset_id)?;
+        let (symbols, _watchlist_name) = ops.load_watchlist(&watchlist_id)?;
+        let conditions = ops.load_preset_conditions(&preset_id)?;
 
         let total = symbols.len() as u32;
         if total == 0 {
@@ -663,7 +770,7 @@ where
         }
 
         // 2. Create snapshots
-        let preset_snapshot = self.build_preset_snapshot(preset_id, &conditions);
+        let preset_snapshot = self.build_preset_snapshot(&preset_id, &conditions);
         let symbols_snapshot = self.build_symbols_snapshot(&symbols);
 
         // 3. Create pending run
@@ -671,14 +778,14 @@ where
             watchlist_id: watchlist_id.clone(),
             preset_id: preset_id.clone(),
             total_symbols: total,
-            preset_snapshot_json: preset_snapshot,
-            symbols_snapshot_json: symbols_snapshot,
+            preset_snapshot_json: preset_snapshot.clone(),
+            symbols_snapshot_json: symbols_snapshot.clone(),
             retry_of_run_id: None,
         };
-        let run_id = db.create_scan_run(&run_input)?;
+        let run_id = ops.create_scan_run(&run_input)?;
 
         // 4. Start running
-        db.start_scan_run(&run_id)?;
+        ops.start_scan_run(&run_id)?;
 
         // 5. Register cancellation token
         self.cancellation_registry.register(&run_id).await;
@@ -757,11 +864,9 @@ where
                 Err(_join_error) => {
                     // Task panicked — treat as symbol error
                     failed_count.fetch_add(1, Ordering::Relaxed);
-                    let _ = db.update_scan_progress(
-                        &run_id,
-                        succeeded_count.load(Ordering::Relaxed),
-                        failed_count.load(Ordering::Relaxed),
-                    );
+                    let succeeded = succeeded_count.load(Ordering::Relaxed);
+                    let failed = failed_count.load(Ordering::Relaxed);
+                    let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                     continue;
                 }
             };
@@ -772,16 +877,17 @@ where
                     bars,
                     conditions,
                 } => {
-                    // DB operations by main task
-                    let existing_range = db.date_range(&symbol)?;
-                    let _ = db.upsert_bars(&bars);
+                    // DB operations
+                    let existing_range = ops.date_range(&symbol)?;
+
+                    let _ = ops.upsert_bars(&bars);
 
                     let end = bars
                         .last()
                         .map(|b| b.trade_date.clone())
                         .unwrap_or_default();
                     let start = Self::calc_start_date(&existing_range, &conditions);
-                    let load_bars = db.load_bars(&symbol, &start, &end)?;
+                    let load_bars = ops.load_bars(&symbol, &start, &end)?;
 
                     let preset = crate::domain::ScanPreset {
                         id: preset_id.clone(),
@@ -801,13 +907,11 @@ where
                                 retryable: e.retryable,
                                 attempt: 1,
                             };
-                            let _ = db.save_scan_error(&scan_error);
+                            let _ = ops.save_scan_error(&scan_error);
                             failed_count.fetch_add(1, Ordering::Relaxed);
-                            let _ = db.update_scan_progress(
-                                &run_id,
-                                succeeded_count.load(Ordering::Relaxed),
-                                failed_count.load(Ordering::Relaxed),
-                            );
+                            let succeeded = succeeded_count.load(Ordering::Relaxed);
+                            let failed = failed_count.load(Ordering::Relaxed);
+                            let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                             continue;
                         }
                     };
@@ -825,13 +929,11 @@ where
                                     retryable: e.retryable,
                                     attempt: 1,
                                 };
-                                let _ = db.save_scan_error(&scan_error);
+                                let _ = ops.save_scan_error(&scan_error);
                                 failed_count.fetch_add(1, Ordering::Relaxed);
-                                let _ = db.update_scan_progress(
-                                    &run_id,
-                                    succeeded_count.load(Ordering::Relaxed),
-                                    failed_count.load(Ordering::Relaxed),
-                                );
+                                let succeeded = succeeded_count.load(Ordering::Relaxed);
+                                let failed = failed_count.load(Ordering::Relaxed);
+                                let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                                 continue;
                             }
                         };
@@ -840,7 +942,7 @@ where
                     let result = self
                         .build_result(&symbol, &run_id, &snapshot, &matches, aggregate, &load_bars);
 
-                    let _ = db.save_scan_result(&result);
+                    let _ = ops.save_scan_result(&result);
                     succeeded_count.fetch_add(1, Ordering::Relaxed);
 
                     if let Ok(mut latest) = latest_trade_date.lock() {
@@ -853,11 +955,9 @@ where
                         }
                     }
 
-                    let _ = db.update_scan_progress(
-                        &run_id,
-                        succeeded_count.load(Ordering::Relaxed),
-                        failed_count.load(Ordering::Relaxed),
-                    );
+                    let succeeded = succeeded_count.load(Ordering::Relaxed);
+                    let failed = failed_count.load(Ordering::Relaxed);
+                    let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                 }
                 ComputeResult::Error { symbol, error } => {
                     let scan_error = crate::domain::ScanError {
@@ -869,13 +969,11 @@ where
                         retryable: error.retryable,
                         attempt: 1,
                     };
-                    let _ = db.save_scan_error(&scan_error);
+                    let _ = ops.save_scan_error(&scan_error);
                     failed_count.fetch_add(1, Ordering::Relaxed);
-                    let _ = db.update_scan_progress(
-                        &run_id,
-                        succeeded_count.load(Ordering::Relaxed),
-                        failed_count.load(Ordering::Relaxed),
-                    );
+                    let succeeded = succeeded_count.load(Ordering::Relaxed);
+                    let failed = failed_count.load(Ordering::Relaxed);
+                    let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                 }
                 ComputeResult::Cancelled { _symbol: _ } => {
                     // Symbol was cancelled before processing started
@@ -890,16 +988,16 @@ where
         let base_date = latest_trade_date.lock().unwrap().clone();
 
         if let Some(ref date) = base_date {
-            let _ = db.update_stale_flags(&run_id, date);
+            let _ = ops.update_stale_flags(&run_id, date);
         }
 
         if failed == total {
-            let _ = db.mark_scan_failed(&run_id);
+            let _ = ops.mark_scan_failed(&run_id);
         } else {
-            let _ = db.mark_scan_completed(&run_id, base_date.as_deref());
+            let _ = ops.mark_scan_completed(&run_id, base_date.as_deref());
         }
 
-        let _ = db.update_scan_progress(&run_id, succeeded, failed);
+        let _ = ops.update_scan_progress(&run_id, succeeded, failed);
 
         // Remove cancellation token
         self.cancellation_registry.remove(&run_id).await;
@@ -913,7 +1011,6 @@ where
         })
     }
 
-    /// Check if a specific run has been cancelled.
     async fn is_cancelled_run(&self, run_id: &crate::domain::ScanRunId) -> bool {
         if let Some(token) = self.cancellation_registry.get(run_id).await {
             token.is_cancelled()
@@ -1918,12 +2015,12 @@ mod concurrent_tests {
         let registry = make_registry();
         let service = ScanService::new(provider, cancellation, registry);
 
-        let mut db = ConcurrentFakeDatabaseOps::new(symbols, conditions);
+        let mut _db = ConcurrentFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-c1").unwrap();
         let preset_id = ScanPresetId::new("ps-c1").unwrap();
 
         let result = service
-            .run_scan_concurrent(&watchlist_id, &preset_id, &mut db)
+            .run_scan_concurrent(&watchlist_id, &preset_id, &mut _db)
             .await;
 
         assert!(result.is_ok());
@@ -1981,12 +2078,12 @@ mod concurrent_tests {
         let registry = make_registry();
         let service = ScanService::new(provider, cancellation, registry);
 
-        let mut db = ConcurrentFakeDatabaseOps::new(symbols, conditions);
+        let mut _db = ConcurrentFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-c2").unwrap();
         let preset_id = ScanPresetId::new("ps-c2").unwrap();
 
         let result = service
-            .run_scan_concurrent(&watchlist_id, &preset_id, &mut db)
+            .run_scan_concurrent(&watchlist_id, &preset_id, &mut _db)
             .await;
 
         assert!(result.is_ok());

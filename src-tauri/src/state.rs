@@ -104,14 +104,23 @@ impl Default for CancellationRegistry {
 }
 
 pub struct AppState {
-    database: std::sync::Mutex<Database>,
+    database: Arc<std::sync::Mutex<Database>>,
     cancellation_registry: Arc<CancellationRegistry>,
+}
+
+impl Clone for AppState {
+    fn clone(&self) -> Self {
+        Self {
+            database: Arc::clone(&self.database),
+            cancellation_registry: Arc::clone(&self.cancellation_registry),
+        }
+    }
 }
 
 impl AppState {
     pub fn new(database: Database) -> Self {
         Self {
-            database: std::sync::Mutex::new(database),
+            database: Arc::new(std::sync::Mutex::new(database)),
             cancellation_registry: Arc::new(CancellationRegistry::new()),
         }
     }
