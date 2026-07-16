@@ -25,6 +25,7 @@ impl<'connection> DailyBarRepository<'connection> {
 
         for bar in bars {
             bar.validate()?;
+            validate_trade_date(&bar.trade_date)?;
         }
 
         let mut basis_by_symbol: HashMap<&str, PriceBasis> = HashMap::new();
@@ -139,6 +140,14 @@ impl<'connection> DailyBarRepository<'connection> {
         start_date: &str,
         end_date: &str,
     ) -> AppResult<Vec<DailyBar>> {
+        validate_trade_date(start_date)?;
+        validate_trade_date(end_date)?;
+        if start_date > end_date {
+            return Err(AppError::validation(
+                "DailyBar range start_date must not be after end_date",
+            ));
+        }
+
         let mut statement = self
             .connection
             .prepare(
@@ -172,6 +181,7 @@ impl<'connection> DailyBarRepository<'connection> {
             .into_iter()
             .map(
                 |(symbol_str, trade_date, price_basis_str, open, high, low, close, volume)| {
+                    validate_trade_date(&trade_date)?;
                     Ok(DailyBar {
                         symbol: Symbol::new(&symbol_str)?,
                         trade_date,
@@ -204,6 +214,41 @@ fn parse_price_basis(value: &str) -> AppResult<PriceBasis> {
             value.to_string(),
         )),
     }
+}
+
+fn validate_trade_date(value: &str) -> AppResult<()> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return Err(AppError::validation("trade_date must use YYYY-MM-DD"));
+    }
+
+    let year = value[0..4]
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("trade_date year must be numeric"))?;
+    let month = value[5..7]
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("trade_date month must be numeric"))?;
+    let day = value[8..10]
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("trade_date day must be numeric"))?;
+
+    if year == 0 || !(1..=12).contains(&month) {
+        return Err(AppError::validation("trade_date is not a valid calendar date"));
+    }
+
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+
+    if day == 0 || day > max_day {
+        return Err(AppError::validation("trade_date is not a valid calendar date"));
+    }
+
+    Ok(())
 }
 
 fn db_error(message: &'static str, error: rusqlite::Error) -> AppError {
