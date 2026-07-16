@@ -174,30 +174,22 @@ export default function ScanRunSetup() {
     }
   }, [state.currentRunId]);
 
-  const unsubscribeRefs = useRef<{ progress: (() => void) | null; result: (() => void) | null }>({
-    progress: null,
-    result: null,
-  });
-
   useEffect(() => {
     if (!state.currentRunId) return;
 
+    let unsubProgress: (() => void) | null = null;
+    let unsubResult: (() => void) | null = null;
+
     subscribeScanEvent("scan://progress", handleProgress).then((unsub) => {
-      unsubscribeRefs.current.progress = unsub;
+      unsubProgress = unsub;
     });
     subscribeScanEvent("scan://result", handleResult).then((unsub) => {
-      unsubscribeRefs.current.result = unsub;
+      unsubResult = unsub;
     });
 
     return () => {
-      if (unsubscribeRefs.current.progress) {
-        unsubscribeRefs.current.progress();
-        unsubscribeRefs.current.progress = null;
-      }
-      if (unsubscribeRefs.current.result) {
-        unsubscribeRefs.current.result();
-        unsubscribeRefs.current.result = null;
-      }
+      if (unsubProgress) unsubProgress();
+      if (unsubResult) unsubResult();
     };
   }, [state.currentRunId, handleProgress, handleResult]);
 
