@@ -2,16 +2,16 @@ import { listen } from "@tauri-apps/api/event";
 
 import type { ScanEventPayload, ScanEventType } from "./types";
 
-type EventCallback<T = ScanEventPayload> = (payload: T) => void;
+type EventCallback = (payload: ScanEventPayload) => void;
 
 let eventListeners: Array<() => void> = [];
 
-export async function subscribeScanEvent<T extends ScanEventType>(
-  eventType: T,
-  callback: EventCallback<Extract<ScanEventPayload, { runId: string }>>,
+export async function subscribeScanEvent(
+  eventType: ScanEventType,
+  callback: EventCallback,
 ): Promise<() => void> {
   const unsubscribe = await listen<ScanEventPayload>(eventType, (event) => {
-    callback(event.payload as Extract<ScanEventPayload, { runId: string }>);
+    callback(event.payload);
   });
 
   eventListeners.push(unsubscribe);

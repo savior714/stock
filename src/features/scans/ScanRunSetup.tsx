@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatAppError } from "@/lib/app-error";
 import { cancelScan, getScanErrors, getScanRun, listScanRuns, startScan } from "./api";
-import type { ScanError, ScanRunDetail, ScanRunSummary } from "./types";
+import { subscribeScanEvent, unsubscribeAll } from "./events";
+import type {
+  ScanError,
+  ScanEventPayload,
+  ScanRunDetail,
+  ScanRunSummary,
+} from "./types";
 import { listWatchlists } from "@/features/watchlists/api";
 import type { WatchlistSummary } from "@/features/watchlists/types";
 import { listScanPresets } from "@/features/scan-presets/api";
@@ -26,6 +32,8 @@ type SetupState = {
   errors: ScanError[];
   globalError: string;
   isLoading: boolean;
+  currentSymbol: string | null;
+  isCancelling: boolean;
 };
 
 const emptyState: SetupState = {
@@ -39,6 +47,8 @@ const emptyState: SetupState = {
   errors: [],
   globalError: "",
   isLoading: false,
+  currentSymbol: null,
+  isCancelling: false,
 };
 
 const FINISHED_STATUSES: Set<ScanRunDetail["status"]> = new Set([
@@ -121,9 +131,9 @@ export default function ScanRunSetup() {
           }
           try {
             const errors = await getScanErrors(runId);
-            setState((s) => ({ ...s, errors, isRunning: false }));
+            setState((s) => ({ ...s, errors, isRunning: false, isCancelling: false }));
           } catch {
-            setState((s) => ({ ...s, isRunning: false }));
+            setState((s) => ({ ...s, isRunning: false, isCancelling: false }));
           }
         }
       } catch {
@@ -143,6 +153,59 @@ export default function ScanRunSetup() {
       }
     };
   }, [state.currentRunId, state.isRunning, startPolling]);
+
+  const handleProgress = useCallback((payload: ScanEventPayload) => {
+    if (payload.runId !== state.currentRunId) return;
+    if ("currentSymbol" in payload) {
+      setState((s) => ({
+        ...s,
+        currentSymbol: payload.currentSymbol ?? null,
+      }));
+    }
+  }, [state.currentRunId]);
+
+  const handleResult = useCallback((payload: ScanEventPayload) => {
+    if (payload.runId !== state.currentRunId) return;
+    if ("symbol" in payload && "success" in payload) {
+      setState((s) => ({
+        ...s,
+        currentSymbol: payload.success ? null : payload.symbol,
+      }));
+    }
+  }, [state.currentRunId]);
+
+  const unsubscribeRefs = useRef<{ progress: (() => void) | null; result: (() => void) | null }>({
+    progress: null,
+    result: null,
+  });
+
+  useEffect(() => {
+    if (!state.currentRunId) return;
+
+    subscribeScanEvent("scan://progress", handleProgress).then((unsub) => {
+      unsubscribeRefs.current.progress = unsub;
+    });
+    subscribeScanEvent("scan://result", handleResult).then((unsub) => {
+      unsubscribeRefs.current.result = unsub;
+    });
+
+    return () => {
+      if (unsubscribeRefs.current.progress) {
+        unsubscribeRefs.current.progress();
+        unsubscribeRefs.current.progress = null;
+      }
+      if (unsubscribeRefs.current.result) {
+        unsubscribeRefs.current.result();
+        unsubscribeRefs.current.result = null;
+      }
+    };
+  }, [state.currentRunId, handleProgress, handleResult]);
+
+  useEffect(() => {
+    return () => {
+      unsubscribeAll();
+    };
+  }, []);
 
   const handleWatchlistChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     setState((s) => ({
@@ -186,16 +249,16 @@ export default function ScanRunSetup() {
   }, [state.selectedWatchlistId, state.selectedPresetId, startPolling]);
 
   const handleCancel = useCallback(async () => {
-    if (!state.currentRunId) return;
+    if (!state.currentRunId || state.isCancelling) return;
 
-    setState((s) => ({ ...s, globalError: "" }));
+    setState((s) => ({ ...s, isCancelling: true, globalError: "" }));
 
     try {
       await cancelScan(state.currentRunId);
     } catch (error) {
-      setState((s) => ({ ...s, globalError: formatAppError(error) }));
+      setState((s) => ({ ...s, isCancelling: false, globalError: formatAppError(error) }));
     }
-  }, [state.currentRunId]);
+  }, [state.currentRunId, state.isCancelling]);
 
   const handleReset = useCallback(() => {
     if (pollTimerRef.current) {
@@ -368,6 +431,11 @@ export default function ScanRunSetup() {
                   {state.runDetail.status}
                 </span>
               </div>
+              {state.currentSymbol && (
+                <div style={{ fontSize: "12px", color: "#8f98aa", marginBottom: "6px" }}>
+                  Processing: <strong style={{ color: "#c9d4e7" }}>{state.currentSymbol}</strong>
+                </div>
+              )}
               <div style={{
                 height: "6px",
                 borderRadius: "3px",
