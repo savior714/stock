@@ -11,8 +11,9 @@ use crate::provider::{
 use crate::repository::daily_bar::DailyBarRepository;
 use crate::signal;
 use serde_json;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 // ---------------------------------------------------------------------------
 // DatabaseOps trait — abstracts repository operations needed by the service
@@ -58,6 +59,31 @@ pub struct ScanRunCreateInput {
 /// Result of a sequential scan run.
 #[derive(Debug)]
 pub struct SequentialScanResult {
+    pub run_id: crate::domain::ScanRunId,
+    pub total_symbols: u32,
+    pub succeeded_symbols: u32,
+    pub failed_symbols: u32,
+    pub base_trade_date: Option<String>,
+}
+
+/// Result of computing a symbol in a concurrent scan (returned from spawned task).
+enum ComputeResult {
+    Success {
+        symbol: crate::domain::Symbol,
+        bars: Vec<crate::domain::DailyBar>,
+        conditions: Vec<crate::domain::SignalCondition>,
+    },
+    Error {
+        symbol: crate::domain::Symbol,
+        error: crate::error::AppError,
+    },
+    Cancelled {
+        _symbol: crate::domain::Symbol,
+    },
+}
+
+/// Result of a concurrent scan run.
+pub struct ConcurrentScanResult {
     pub run_id: crate::domain::ScanRunId,
     pub total_symbols: u32,
     pub succeeded_symbols: u32,
@@ -230,16 +256,22 @@ where
 {
     provider: Arc<P>,
     cancellation: Arc<Mutex<CancellationToken>>,
+    cancellation_registry: Arc<crate::state::CancellationRegistry>,
 }
 
 impl<P> ScanService<P>
 where
-    P: MarketDataProvider,
+    P: MarketDataProvider + 'static,
 {
-    pub fn new(provider: P, cancellation: Arc<Mutex<CancellationToken>>) -> Self {
+    pub fn new(
+        provider: P,
+        cancellation: Arc<Mutex<CancellationToken>>,
+        cancellation_registry: Arc<crate::state::CancellationRegistry>,
+    ) -> Self {
         Self {
             provider: Arc::new(provider),
             cancellation,
+            cancellation_registry,
         }
     }
 
@@ -431,7 +463,7 @@ where
 
 impl<P> ScanService<P>
 where
-    P: MarketDataProvider,
+    P: MarketDataProvider + 'static,
 {
     /// Run a sequential scan across all symbols in a watchlist.
     ///
@@ -604,6 +636,349 @@ where
         let list: Vec<&str> = symbols.iter().map(|s| s.as_str()).collect();
         serde_json::to_string(&list).unwrap_or_default()
     }
+
+    // ------------------------------------------------------------------
+    // Concurrent scan
+    // ------------------------------------------------------------------
+
+    /// Run a concurrent scan across all symbols with bounded concurrency (4).
+    ///
+    /// Symbols are processed concurrently. DB operations (upsert, load, save)
+    /// are performed by the main task to avoid holding DB locks during network I/O.
+    /// Task panics are caught and treated as symbol errors.
+    /// Cancellation prevents new symbol tasks from starting.
+    pub async fn run_scan_concurrent(
+        &self,
+        watchlist_id: &crate::domain::WatchlistId,
+        preset_id: &crate::domain::ScanPresetId,
+        db: &mut dyn DatabaseOpsExtended,
+    ) -> AppResult<ConcurrentScanResult> {
+        // 1. Load watchlist and preset
+        let (symbols, _watchlist_name) = db.load_watchlist(watchlist_id)?;
+        let conditions = db.load_preset_conditions(preset_id)?;
+
+        let total = symbols.len() as u32;
+        if total == 0 {
+            return Err(AppError::validation("watchlist has no symbols"));
+        }
+
+        // 2. Create snapshots
+        let preset_snapshot = self.build_preset_snapshot(preset_id, &conditions);
+        let symbols_snapshot = self.build_symbols_snapshot(&symbols);
+
+        // 3. Create pending run
+        let run_input = ScanRunCreateInput {
+            watchlist_id: watchlist_id.clone(),
+            preset_id: preset_id.clone(),
+            total_symbols: total,
+            preset_snapshot_json: preset_snapshot,
+            symbols_snapshot_json: symbols_snapshot,
+            retry_of_run_id: None,
+        };
+        let run_id = db.create_scan_run(&run_input)?;
+
+        // 4. Start running
+        db.start_scan_run(&run_id)?;
+
+        // 5. Register cancellation token
+        self.cancellation_registry.register(&run_id).await;
+
+        // 6. Shared state
+        let succeeded_count = AtomicU32::new(0);
+        let failed_count = AtomicU32::new(0);
+        let latest_trade_date = std::sync::Mutex::new(None);
+
+        // 7. Semaphore for bounded concurrency (4)
+        let semaphore = Arc::new(Semaphore::new(4));
+        let mut handles = Vec::new();
+
+        // 8. Spawn tasks
+        for symbol in symbols {
+            // Check cancellation before spawning
+            if self.is_cancelled_run(&run_id).await {
+                break;
+            }
+
+            let sem = Arc::clone(&semaphore);
+            let provider = Arc::clone(&self.provider);
+            let cancellation = Arc::clone(&self.cancellation);
+            let preset_conditions = conditions.clone();
+
+            let handle = tokio::spawn(async move {
+                // Acquire permit (bounds concurrency)
+                let _permit = match sem.acquire().await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return ComputeResult::Cancelled { _symbol: symbol };
+                    }
+                };
+
+                // Check cancellation before processing
+                {
+                    let token = cancellation.lock().await;
+                    if token.is_cancelled() {
+                        return ComputeResult::Cancelled { _symbol: symbol };
+                    }
+                }
+
+                // Fetch bars from provider
+                let fetch_range =
+                    Self::plan_fetch_for_symbol(&provider, &symbol, &preset_conditions);
+                match provider.fetch_daily_bars(&symbol, &fetch_range).await {
+                    Ok(bars) => {
+                        // Validate bars
+                        for bar in &bars {
+                            if let Err(e) = bar.validate() {
+                                return ComputeResult::Error { symbol, error: e };
+                            }
+                        }
+                        ComputeResult::Success {
+                            symbol,
+                            bars,
+                            conditions: preset_conditions,
+                        }
+                    }
+                    Err(e) => ComputeResult::Error { symbol, error: e },
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // 9. Collect results
+        for handle in handles {
+            // Check cancellation before awaiting next task
+            if self.is_cancelled_run(&run_id).await {
+                break;
+            }
+
+            let compute_result = match handle.await {
+                Ok(result) => result,
+                Err(_join_error) => {
+                    // Task panicked — treat as symbol error
+                    failed_count.fetch_add(1, Ordering::Relaxed);
+                    let _ = db.update_scan_progress(
+                        &run_id,
+                        succeeded_count.load(Ordering::Relaxed),
+                        failed_count.load(Ordering::Relaxed),
+                    );
+                    continue;
+                }
+            };
+
+            match compute_result {
+                ComputeResult::Success {
+                    symbol,
+                    bars,
+                    conditions,
+                } => {
+                    // DB operations by main task
+                    let existing_range = db.date_range(&symbol)?;
+                    let _ = db.upsert_bars(&bars);
+
+                    let end = bars
+                        .last()
+                        .map(|b| b.trade_date.clone())
+                        .unwrap_or_default();
+                    let start = Self::calc_start_date(&existing_range, &conditions);
+                    let load_bars = db.load_bars(&symbol, &start, &end)?;
+
+                    let preset = crate::domain::ScanPreset {
+                        id: preset_id.clone(),
+                        name: String::new(),
+                        conditions,
+                    };
+
+                    let snapshot = match crate::indicator::compute_snapshot(&load_bars, &preset) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let scan_error = crate::domain::ScanError {
+                                run_id: run_id.clone(),
+                                symbol: Some(symbol.as_str().to_string()),
+                                code: format!("{:?}", e.code),
+                                message: e.message.clone(),
+                                detail: e.detail.clone(),
+                                retryable: e.retryable,
+                                attempt: 1,
+                            };
+                            let _ = db.save_scan_error(&scan_error);
+                            failed_count.fetch_add(1, Ordering::Relaxed);
+                            let _ = db.update_scan_progress(
+                                &run_id,
+                                succeeded_count.load(Ordering::Relaxed),
+                                failed_count.load(Ordering::Relaxed),
+                            );
+                            continue;
+                        }
+                    };
+
+                    let matches =
+                        match crate::signal::evaluate_signals(&snapshot, &preset.conditions) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                let scan_error = crate::domain::ScanError {
+                                    run_id: run_id.clone(),
+                                    symbol: Some(symbol.as_str().to_string()),
+                                    code: format!("{:?}", e.code),
+                                    message: e.message.clone(),
+                                    detail: e.detail.clone(),
+                                    retryable: e.retryable,
+                                    attempt: 1,
+                                };
+                                let _ = db.save_scan_error(&scan_error);
+                                failed_count.fetch_add(1, Ordering::Relaxed);
+                                let _ = db.update_scan_progress(
+                                    &run_id,
+                                    succeeded_count.load(Ordering::Relaxed),
+                                    failed_count.load(Ordering::Relaxed),
+                                );
+                                continue;
+                            }
+                        };
+
+                    let aggregate = crate::signal::aggregate_matches(&matches);
+                    let result = self
+                        .build_result(&symbol, &run_id, &snapshot, &matches, aggregate, &load_bars);
+
+                    let _ = db.save_scan_result(&result);
+                    succeeded_count.fetch_add(1, Ordering::Relaxed);
+
+                    if let Ok(mut latest) = latest_trade_date.lock() {
+                        if let Some(ref current) = *latest {
+                            if result.trade_date > *current {
+                                *latest = Some(result.trade_date.clone());
+                            }
+                        } else {
+                            *latest = Some(result.trade_date.clone());
+                        }
+                    }
+
+                    let _ = db.update_scan_progress(
+                        &run_id,
+                        succeeded_count.load(Ordering::Relaxed),
+                        failed_count.load(Ordering::Relaxed),
+                    );
+                }
+                ComputeResult::Error { symbol, error } => {
+                    let scan_error = crate::domain::ScanError {
+                        run_id: run_id.clone(),
+                        symbol: Some(symbol.as_str().to_string()),
+                        code: format!("{:?}", error.code),
+                        message: error.message.clone(),
+                        detail: error.detail.clone(),
+                        retryable: error.retryable,
+                        attempt: 1,
+                    };
+                    let _ = db.save_scan_error(&scan_error);
+                    failed_count.fetch_add(1, Ordering::Relaxed);
+                    let _ = db.update_scan_progress(
+                        &run_id,
+                        succeeded_count.load(Ordering::Relaxed),
+                        failed_count.load(Ordering::Relaxed),
+                    );
+                }
+                ComputeResult::Cancelled { _symbol: _ } => {
+                    // Symbol was cancelled before processing started
+                    break;
+                }
+            }
+        }
+
+        // 10. Finalize
+        let succeeded = succeeded_count.load(Ordering::Relaxed);
+        let failed = failed_count.load(Ordering::Relaxed);
+        let base_date = latest_trade_date.lock().unwrap().clone();
+
+        if let Some(ref date) = base_date {
+            let _ = db.update_stale_flags(&run_id, date);
+        }
+
+        if failed == total {
+            let _ = db.mark_scan_failed(&run_id);
+        } else {
+            let _ = db.mark_scan_completed(&run_id, base_date.as_deref());
+        }
+
+        let _ = db.update_scan_progress(&run_id, succeeded, failed);
+
+        // Remove cancellation token
+        self.cancellation_registry.remove(&run_id).await;
+
+        Ok(ConcurrentScanResult {
+            run_id,
+            total_symbols: total,
+            succeeded_symbols: succeeded,
+            failed_symbols: failed,
+            base_trade_date: base_date,
+        })
+    }
+
+    /// Check if a specific run has been cancelled.
+    async fn is_cancelled_run(&self, run_id: &crate::domain::ScanRunId) -> bool {
+        if let Some(token) = self.cancellation_registry.get(run_id).await {
+            token.is_cancelled()
+        } else {
+            false
+        }
+    }
+
+    /// Plan fetch range for a symbol (fresh fetch, no existing range info in concurrent tasks).
+    fn plan_fetch_for_symbol(
+        provider: &Arc<P>,
+        _symbol: &crate::domain::Symbol,
+        conditions: &[crate::domain::SignalCondition],
+    ) -> crate::provider::DateRange {
+        let _ = provider; // used via trait method call below
+        let max_period = conditions
+            .iter()
+            .filter(|c| c.enabled)
+            .map(|c| c.period)
+            .max()
+            .unwrap_or(14);
+        let planner = crate::provider::fetch_planner::FetchPlanner::new(max_period);
+        let fresh = planner.plan_fresh_fetch();
+        let end = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let days = fresh.days_back;
+        let start = chrono::Utc::now()
+            .checked_sub_days(chrono::Days::new(days as u64))
+            .unwrap_or_else(chrono::Utc::now)
+            .format("%Y-%m-%d")
+            .to_string();
+        crate::provider::DateRange::new(start, end)
+    }
+
+    /// Calculate start date for loading bars.
+    fn calc_start_date(
+        existing_range: &Option<(String, String)>,
+        conditions: &[crate::domain::SignalCondition],
+    ) -> String {
+        let max_period = conditions
+            .iter()
+            .filter(|c| c.enabled)
+            .map(|c| c.period)
+            .max()
+            .unwrap_or(14);
+        let min_bars = (max_period + 2) as usize;
+
+        match existing_range {
+            None => {
+                let days = std::cmp::max(min_bars, 30);
+                chrono::Utc::now()
+                    .checked_sub_days(chrono::Days::new(days as u64))
+                    .unwrap_or_else(chrono::Utc::now)
+                    .format("%Y-%m-%d")
+                    .to_string()
+            }
+            Some((_min, max)) => {
+                let parsed = chrono::NaiveDate::parse_from_str(max, "%Y-%m-%d")
+                    .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap());
+                let start = parsed
+                    .checked_sub_days(chrono::Days::new((min_bars + 5) as u64))
+                    .unwrap_or(parsed);
+                start.format("%Y-%m-%d").to_string()
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -730,6 +1105,10 @@ mod tests {
         Arc::new(Mutex::new(CancellationToken::new()))
     }
 
+    fn make_registry() -> Arc<crate::state::CancellationRegistry> {
+        Arc::new(crate::state::CancellationRegistry::new())
+    }
+
     // ---- Tests ----
 
     #[tokio::test]
@@ -739,7 +1118,8 @@ mod tests {
             .collect();
         let provider = FakeProvider::new(bars.clone());
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let symbol = Symbol::new("AAPL").unwrap();
         let preset = make_preset(14, 30.0);
@@ -764,7 +1144,8 @@ mod tests {
             AppError::new(AppErrorCode::ProviderUnavailable, "network error").retryable(true),
         );
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let symbol = Symbol::new("TSLA").unwrap();
         let preset = make_preset(14, 30.0);
@@ -785,7 +1166,8 @@ mod tests {
         let bars = vec![make_bar("2026-07-01", 100.0), make_bar("2026-07-02", 101.0)];
         let provider = FakeProvider::new(bars);
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let symbol = Symbol::new("AAPL").unwrap();
         let preset = make_preset(14, 30.0);
@@ -817,7 +1199,8 @@ mod tests {
 
         let provider = FakeProvider::new(bars);
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let symbol = Symbol::new("AAPL").unwrap();
         let preset = make_preset(14, 30.0);
@@ -848,7 +1231,8 @@ mod tests {
             .collect();
         let provider = FakeProvider::new(bars.clone());
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let preset = ScanPreset {
             id: ScanPresetId::new("test-preset").unwrap(),
@@ -884,7 +1268,8 @@ mod tests {
             .collect();
         let provider = FakeProvider::new(bars.clone());
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         // Simulate existing data with max date 2026-07-10
         let mut db = FakeDatabaseOps::new(
@@ -911,7 +1296,8 @@ mod tests {
             .collect();
         let provider = FakeProvider::new(bars.clone());
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let symbol = Symbol::new("AAPL").unwrap();
         let preset = make_preset(14, 30.0);
@@ -940,7 +1326,8 @@ mod tests {
             .collect();
         let provider = FakeProvider::new(bars.clone());
         let cancellation = make_cancellation();
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         // RSI lower threshold=30 — with steadily rising prices, RSI likely > 30
         let preset = make_preset(14, 30.0);
@@ -1119,6 +1506,10 @@ mod sequential_tests {
         }
     }
 
+    fn make_registry() -> Arc<crate::state::CancellationRegistry> {
+        Arc::new(crate::state::CancellationRegistry::new())
+    }
+
     fn make_rsi_condition(period: u32, threshold: f64) -> SignalCondition {
         SignalCondition {
             id: SignalConditionId::new("rsi1").unwrap(),
@@ -1156,7 +1547,8 @@ mod sequential_tests {
                 .collect(),
         );
         let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-1").unwrap();
@@ -1221,7 +1613,8 @@ mod sequential_tests {
             fail_on: vec!["GOOGL".to_string()],
         };
         let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-2").unwrap();
@@ -1269,7 +1662,8 @@ mod sequential_tests {
         let conditions = vec![make_rsi_condition(14, 30.0)];
         let provider = AlwaysFailingProvider;
         let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-3").unwrap();
@@ -1306,7 +1700,8 @@ mod sequential_tests {
                 .collect(),
         );
         let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-4").unwrap();
@@ -1330,7 +1725,8 @@ mod sequential_tests {
         let conditions = vec![make_rsi_condition(14, 30.0)];
         let provider = FakeProvider::new(vec![]);
         let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
-        let service = ScanService::new(provider, cancellation);
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
         let watchlist_id = WatchlistId::new("wl-5").unwrap();
@@ -1342,5 +1738,267 @@ mod sequential_tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, AppErrorCode::Validation);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Concurrent scan tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod concurrent_tests {
+    use super::tests::FakeProvider;
+    use super::*;
+    use crate::domain::{
+        IndicatorKind, PriceBasis, ScanPresetId, SignalCondition, SignalConditionId, SignalSide,
+        TriggerMode, WatchlistId,
+    };
+    use serde_json::json;
+
+    struct ConcurrentFakeDatabaseOps {
+        symbols: Vec<crate::domain::Symbol>,
+        conditions: Vec<SignalCondition>,
+    }
+
+    impl ConcurrentFakeDatabaseOps {
+        fn new(symbols: Vec<crate::domain::Symbol>, conditions: Vec<SignalCondition>) -> Self {
+            Self {
+                symbols,
+                conditions,
+            }
+        }
+    }
+
+    impl DatabaseOps for ConcurrentFakeDatabaseOps {
+        fn date_range(
+            &mut self,
+            _symbol: &crate::domain::Symbol,
+        ) -> AppResult<Option<(String, String)>> {
+            Ok(None)
+        }
+
+        fn upsert_bars(&mut self, _bars: &[DailyBar]) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn load_bars(
+            &mut self,
+            _symbol: &crate::domain::Symbol,
+            _start: &str,
+            _end: &str,
+        ) -> AppResult<Vec<DailyBar>> {
+            Ok((0..20)
+                .map(|i| DailyBar {
+                    symbol: crate::domain::Symbol::new("AAPL").unwrap(),
+                    trade_date: format!("2026-07-{:02}", i + 1),
+                    price_basis: PriceBasis::SplitAdjusted,
+                    open: 100.0 + i as f64,
+                    high: 101.0 + i as f64,
+                    low: 99.0 + i as f64,
+                    close: 100.0 + i as f64,
+                    volume: 1_000,
+                })
+                .collect())
+        }
+    }
+
+    impl DatabaseOpsExtended for ConcurrentFakeDatabaseOps {
+        fn load_watchlist(
+            &mut self,
+            _id: &WatchlistId,
+        ) -> AppResult<(Vec<crate::domain::Symbol>, String)> {
+            Ok((self.symbols.clone(), "Test Watchlist".to_string()))
+        }
+
+        fn load_preset_conditions(
+            &mut self,
+            _id: &ScanPresetId,
+        ) -> AppResult<Vec<SignalCondition>> {
+            Ok(self.conditions.clone())
+        }
+
+        fn create_scan_run(
+            &mut self,
+            input: &ScanRunCreateInput,
+        ) -> AppResult<crate::domain::ScanRunId> {
+            let id =
+                crate::domain::ScanRunId::new(format!("run-{}", input.watchlist_id.0)).unwrap();
+            Ok(id)
+        }
+
+        fn start_scan_run(&mut self, _id: &crate::domain::ScanRunId) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn save_scan_result(&mut self, _result: &crate::domain::ScanResult) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn save_scan_error(&mut self, _error: &crate::domain::ScanError) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn update_scan_progress(
+            &mut self,
+            _id: &crate::domain::ScanRunId,
+            _succeeded: u32,
+            _failed: u32,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn mark_scan_completed(
+            &mut self,
+            _id: &crate::domain::ScanRunId,
+            _base_date: Option<&str>,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn mark_scan_cancelled(&mut self, _id: &crate::domain::ScanRunId) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn mark_scan_failed(&mut self, _id: &crate::domain::ScanRunId) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn update_stale_flags(
+            &mut self,
+            _id: &crate::domain::ScanRunId,
+            _base_date: &str,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+    }
+
+    fn make_registry() -> Arc<crate::state::CancellationRegistry> {
+        Arc::new(crate::state::CancellationRegistry::new())
+    }
+
+    fn make_rsi_condition(period: u32, threshold: f64) -> SignalCondition {
+        SignalCondition {
+            id: SignalConditionId::new("rsi1").unwrap(),
+            indicator: IndicatorKind::Rsi,
+            side: SignalSide::Lower,
+            period,
+            threshold: Some(threshold),
+            parameters: json!({}),
+            trigger_mode: TriggerMode::Current,
+            enabled: true,
+            sort_order: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_scan_completes_all_symbols() {
+        let symbols = vec![
+            crate::domain::Symbol::new("AAPL").unwrap(),
+            crate::domain::Symbol::new("GOOGL").unwrap(),
+            crate::domain::Symbol::new("MSFT").unwrap(),
+            crate::domain::Symbol::new("AMZN").unwrap(),
+            crate::domain::Symbol::new("META").unwrap(),
+        ];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = FakeProvider::new(
+            (0..20)
+                .map(|i| DailyBar {
+                    symbol: crate::domain::Symbol::new("AAPL").unwrap(),
+                    trade_date: format!("2026-07-{:02}", i + 1),
+                    price_basis: PriceBasis::SplitAdjusted,
+                    open: 100.0 + i as f64,
+                    high: 101.0 + i as f64,
+                    low: 99.0 + i as f64,
+                    close: 100.0 + i as f64,
+                    volume: 1_000,
+                })
+                .collect(),
+        );
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
+
+        let mut db = ConcurrentFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-c1").unwrap();
+        let preset_id = ScanPresetId::new("ps-c1").unwrap();
+
+        let result = service
+            .run_scan_concurrent(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_symbols, 5);
+        assert_eq!(scan_result.succeeded_symbols, 5);
+        assert_eq!(scan_result.failed_symbols, 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_scan_handles_partial_failures() {
+        struct PartialFailingProvider {
+            fail_on: Vec<String>,
+        }
+
+        #[async_trait::async_trait]
+        impl MarketDataProvider for PartialFailingProvider {
+            async fn fetch_daily_bars(
+                &self,
+                symbol: &crate::domain::Symbol,
+                _range: &DateRange,
+            ) -> AppResult<Vec<DailyBar>> {
+                if self.fail_on.contains(&symbol.as_str().to_string()) {
+                    return Err(AppError::new(
+                        AppErrorCode::ProviderUnavailable,
+                        format!("failed for {}", symbol),
+                    )
+                    .retryable(true));
+                }
+                Ok((0..20)
+                    .map(|i| DailyBar {
+                        symbol: symbol.clone(),
+                        trade_date: format!("2026-07-{:02}", i + 1),
+                        price_basis: PriceBasis::SplitAdjusted,
+                        open: 100.0 + i as f64,
+                        high: 101.0 + i as f64,
+                        low: 99.0 + i as f64,
+                        close: 100.0 + i as f64,
+                        volume: 1_000,
+                    })
+                    .collect())
+            }
+        }
+
+        let symbols = vec![
+            crate::domain::Symbol::new("AAPL").unwrap(),
+            crate::domain::Symbol::new("GOOGL").unwrap(),
+            crate::domain::Symbol::new("MSFT").unwrap(),
+        ];
+        let conditions = vec![make_rsi_condition(14, 30.0)];
+        let provider = PartialFailingProvider {
+            fail_on: vec!["GOOGL".to_string()],
+        };
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
+        let registry = make_registry();
+        let service = ScanService::new(provider, cancellation, registry);
+
+        let mut db = ConcurrentFakeDatabaseOps::new(symbols, conditions);
+        let watchlist_id = WatchlistId::new("wl-c2").unwrap();
+        let preset_id = ScanPresetId::new("ps-c2").unwrap();
+
+        let result = service
+            .run_scan_concurrent(&watchlist_id, &preset_id, &mut db)
+            .await;
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_symbols, 3);
+        assert_eq!(scan_result.succeeded_symbols, 2);
+        assert_eq!(scan_result.failed_symbols, 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_semaphore_has_four_permits() {
+        let semaphore = Semaphore::new(4);
+        assert_eq!(semaphore.available_permits(), 4);
     }
 }
