@@ -131,6 +131,7 @@ pub trait DatabaseOpsExtended: DatabaseOps + Send {
         id: &crate::domain::ScanRunId,
         base_date: &str,
     ) -> AppResult<()>;
+    fn is_cancelled(&mut self) -> bool;
 }
 
 impl DatabaseOpsExtended for crate::db::Database {
@@ -239,6 +240,10 @@ impl DatabaseOpsExtended for crate::db::Database {
         let mut repo = crate::repository::scan_result::ScanResultRepository::new(self);
         repo.update_stale_flags(id, base_date)
     }
+
+    fn is_cancelled(&mut self) -> bool {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +341,10 @@ impl<'a> DatabaseOpsExtended for ScanDbOpsWrapper<'a> {
     ) -> AppResult<()> {
         DatabaseOpsExtended::update_stale_flags(self.0, id, base_date)
     }
+
+    fn is_cancelled(&mut self) -> bool {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +357,7 @@ pub use crate::state::CancellationToken;
 // ScanService — single-symbol scan pipeline
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct ScanService<P>
 where
     P: MarketDataProvider,
@@ -784,11 +794,11 @@ where
         };
         let run_id = ops.create_scan_run(&run_input)?;
 
-        // 4. Start running
-        ops.start_scan_run(&run_id)?;
-
-        // 5. Register cancellation token
+        // 4. Register cancellation token (before starting, so tasks can check it)
         self.cancellation_registry.register(&run_id).await;
+
+        // 5. Start running
+        ops.start_scan_run(&run_id)?;
 
         // 6. Shared state
         let succeeded_count = AtomicU32::new(0);
@@ -802,10 +812,13 @@ where
         // 8. Spawn tasks
         for symbol in symbols {
             // Check cancellation before spawning
-            if self.is_cancelled_run(&run_id).await {
+            let db_cancelled = ops.is_cancelled();
+            if self.is_cancelled_run(&run_id).await || db_cancelled {
                 break;
             }
 
+            // Yield to allow cancellation checks from other tasks
+            tokio::task::yield_now().await;
             let sem = Arc::clone(&semaphore);
             let provider = Arc::clone(&self.provider);
             let cancellation = Arc::clone(&self.cancellation);
@@ -833,6 +846,13 @@ where
                     Self::plan_fetch_for_symbol(&provider, &symbol, &preset_conditions);
                 match provider.fetch_daily_bars(&symbol, &fetch_range).await {
                     Ok(bars) => {
+                        // Check cancellation after fetch
+                        {
+                            let token = cancellation.lock().await;
+                            if token.is_cancelled() {
+                                return ComputeResult::Cancelled { _symbol: symbol };
+                            }
+                        }
                         // Validate bars
                         for bar in &bars {
                             if let Err(e) = bar.validate() {
@@ -853,30 +873,42 @@ where
         }
 
         // 9. Collect results
+        let mut cancelled = false;
         for handle in handles {
-            // Check cancellation before awaiting next task
-            if self.is_cancelled_run(&run_id).await {
+            // Check cancellation before awaiting
+            if self.is_cancelled_run(&run_id).await || ops.is_cancelled() {
+                cancelled = true;
                 break;
             }
 
-            let compute_result = match handle.await {
-                Ok(result) => result,
-                Err(_join_error) => {
-                    // Task panicked — treat as symbol error
-                    failed_count.fetch_add(1, Ordering::Relaxed);
-                    let succeeded = succeeded_count.load(Ordering::Relaxed);
-                    let failed = failed_count.load(Ordering::Relaxed);
-                    let _ = ops.update_scan_progress(&run_id, succeeded, failed);
-                    continue;
+            // Use select to race between task completion and periodic cancellation checks
+            let compute_result = tokio::select! {
+                result = handle => {
+                    result
+                }
+                _ = async {
+                    // Periodically yield and check cancellation while waiting
+                    loop {
+                        if self.is_cancelled_run(&run_id).await || ops.is_cancelled() {
+                            break;
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                    }
+                } => {
+                    cancelled = true;
+                    Ok(ComputeResult::Cancelled { _symbol: Symbol::new("CANCELLED").unwrap_or_else(|_| Symbol::new("X").unwrap()) })
                 }
             };
 
+            if cancelled {
+                break;
+            }
             match compute_result {
-                ComputeResult::Success {
+                Ok(ComputeResult::Success {
                     symbol,
                     bars,
                     conditions,
-                } => {
+                }) => {
                     // DB operations
                     let existing_range = ops.date_range(&symbol)?;
 
@@ -959,7 +991,7 @@ where
                     let failed = failed_count.load(Ordering::Relaxed);
                     let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                 }
-                ComputeResult::Error { symbol, error } => {
+                Ok(ComputeResult::Error { symbol, error }) => {
                     let scan_error = crate::domain::ScanError {
                         run_id: run_id.clone(),
                         symbol: Some(symbol.as_str().to_string()),
@@ -975,9 +1007,16 @@ where
                     let failed = failed_count.load(Ordering::Relaxed);
                     let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                 }
-                ComputeResult::Cancelled { _symbol: _ } => {
+                Ok(ComputeResult::Cancelled { _symbol: _ }) => {
                     // Symbol was cancelled before processing started
                     break;
+                }
+                Err(_join_error) => {
+                    // Task panicked — treat as symbol error
+                    failed_count.fetch_add(1, Ordering::Relaxed);
+                    let succeeded = succeeded_count.load(Ordering::Relaxed);
+                    let failed = failed_count.load(Ordering::Relaxed);
+                    let _ = ops.update_scan_progress(&run_id, succeeded, failed);
                 }
             }
         }
@@ -991,7 +1030,9 @@ where
             let _ = ops.update_stale_flags(&run_id, date);
         }
 
-        if failed == total {
+        if cancelled {
+            let _ = ops.mark_scan_cancelled(&run_id);
+        } else if failed == total {
             let _ = ops.mark_scan_failed(&run_id);
         } else {
             let _ = ops.mark_scan_completed(&run_id, base_date.as_deref());
@@ -1601,6 +1642,10 @@ mod sequential_tests {
         ) -> AppResult<()> {
             Ok(())
         }
+
+        fn is_cancelled(&mut self) -> bool {
+            false
+        }
     }
 
     fn make_registry() -> Arc<crate::state::CancellationRegistry> {
@@ -1966,6 +2011,10 @@ mod concurrent_tests {
             _base_date: &str,
         ) -> AppResult<()> {
             Ok(())
+        }
+
+        fn is_cancelled(&mut self) -> bool {
+            false
         }
     }
 

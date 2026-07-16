@@ -1,10 +1,8 @@
 use crate::db::Database;
 use crate::domain::ScanRunId;
 use crate::error::{AppError, AppResult};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// Inner cancellation token holding the watch channel and a flag for fast checks.
 struct CancellationTokenInner {
@@ -51,13 +49,13 @@ impl Clone for CancellationToken {
 /// Registry of cancellation tokens for running scans.
 pub struct CancellationRegistry {
     /// Maps run_id to its cancellation token.
-    tokens: Mutex<HashMap<String, CancellationToken>>,
+    tokens: tokio::sync::Mutex<std::collections::HashMap<String, CancellationToken>>,
 }
 
 impl CancellationRegistry {
     pub fn new() -> Self {
         Self {
-            tokens: Mutex::new(HashMap::new()),
+            tokens: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
