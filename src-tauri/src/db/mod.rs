@@ -8,7 +8,8 @@ const CONDITION_TRIGGER_MODE_MIGRATION: &str =
     include_str!("../../migrations/0002_condition_trigger_modes.sql");
 const SCAN_RUN_SNAPSHOTS_MIGRATION: &str =
     include_str!("../../migrations/0003_scan_run_snapshots.sql");
-const LATEST_SCHEMA_VERSION: i64 = 3;
+const LEGACY_IMPORT_MIGRATION: &str = include_str!("../../migrations/0004_legacy_import.sql");
+const LATEST_SCHEMA_VERSION: i64 = 4;
 
 pub struct Database {
     connection: Connection,
@@ -114,6 +115,15 @@ impl Database {
                         error.to_string(),
                     )
                 })?;
+            current_version = 3;
+        }
+
+        if current_version == 3 {
+            connection
+                .execute_batch(LEGACY_IMPORT_MIGRATION)
+                .map_err(|error| {
+                    AppError::database("failed to apply legacy import migration", error.to_string())
+                })?;
         }
 
         Ok(Self { connection })
@@ -185,9 +195,31 @@ mod tests {
             get_column_name(database.connection(), "scan_runs", "symbols_snapshot_json")
                 .expect("symbols_snapshot_json column must exist");
 
-        assert_eq!(database.schema_version().expect("version must exist"), 3);
+        assert_eq!(database.schema_version().expect("version must exist"), 4);
         assert_eq!(foreign_keys, 1);
         assert_eq!(watchlists_table, "watchlists");
+
+        // Verify Legacy Import watchlist was created
+        let legacy_wl: String = database
+            .connection()
+            .query_row(
+                "SELECT name FROM watchlists WHERE id = 'legacy-import-0000-0000-0000-000000000000'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("Legacy Import watchlist must exist");
+        assert_eq!(legacy_wl, "Legacy Import");
+
+        // Verify symbols were imported
+        let symbol_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM watchlist_symbols WHERE watchlist_id = 'legacy-import-0000-0000-0000-000000000000'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("symbol count must be readable");
+        assert_eq!(symbol_count, 374);
         assert_eq!(default_condition_count, 6);
         assert_eq!(preset_snapshot_col, "preset_snapshot_json");
         assert_eq!(symbols_snapshot_col, "symbols_snapshot_json");
@@ -225,11 +257,11 @@ mod tests {
             )
             .expect("trigger mode must exist");
 
-        // v3 snapshot columns must also exist after full migration chain
+        // v4 legacy import columns must also exist after full migration chain
         let retry_of_col = get_column_name(database.connection(), "scan_runs", "retry_of_run_id")
-            .expect("retry_of_run_id column must exist after v1->v2->v3");
+            .expect("retry_of_run_id column must exist after v1->v2->v3->v4");
 
-        assert_eq!(database.schema_version().expect("version must exist"), 3);
+        assert_eq!(database.schema_version().expect("version must exist"), 4);
         assert_eq!(trigger_mode, "cross");
         assert_eq!(retry_of_col, "retry_of_run_id");
     }
@@ -259,10 +291,10 @@ mod tests {
             )
             .expect("preset must insert");
 
-        let database = Database::initialize(connection).expect("database must migrate v2->v3");
+        let database = Database::initialize(connection).expect("database must migrate v2->v3->v4");
 
-        // Verify version reached 3
-        assert_eq!(database.schema_version().expect("version must exist"), 3);
+        // Verify version reached 4
+        assert_eq!(database.schema_version().expect("version must exist"), 4);
 
         // Verify existing data preserved
         let watchlist_name: String = database

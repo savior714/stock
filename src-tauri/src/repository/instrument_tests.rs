@@ -124,7 +124,7 @@ fn list_active_excludes_inactive() {
     let mut database = Database::open_in_memory().expect("database must initialize");
     let mut repository = InstrumentRepository::new(&mut database);
 
-    // Insert active instrument
+    // Insert active instrument (AAPL is in legacy import, so upsert updates it)
     repository
         .upsert(&instrument("AAPL", AssetType::Stock))
         .expect("active upsert must succeed");
@@ -143,8 +143,12 @@ fn list_active_excludes_inactive() {
 
     let active = repository.list_active().expect("list must succeed");
 
-    assert_eq!(active.len(), 1);
-    assert_eq!(active[0].symbol.as_str(), "AAPL");
+    // Legacy import adds 374 active instruments; AAPL is among them.
+    // MSFT is in legacy import but upserted as inactive, so count is 373.
+    assert!(active.len() >= 373);
+    assert!(active.iter().any(|i| i.symbol.as_str() == "AAPL"));
+    // MSFT should not be in the active list (it was inserted as inactive)
+    assert!(!active.iter().any(|i| i.symbol.as_str() == "MSFT"));
 }
 
 #[test]
@@ -153,6 +157,8 @@ fn list_active_orders_by_symbol() {
     let mut repository = InstrumentRepository::new(&mut database);
 
     // Insert in non-alphabetical order
+    // AAPL and BRK.B are in legacy import, so upsert updates them.
+    // Only ZM is a new row.
     repository
         .upsert(&instrument_with_exchange(
             "ZM",
@@ -177,8 +183,16 @@ fn list_active_orders_by_symbol() {
 
     let list = repository.list_active().expect("list must succeed");
 
-    assert_eq!(list.len(), 3);
-    assert_eq!(list[0].symbol.as_str(), "AAPL");
-    assert_eq!(list[1].symbol.as_str(), "BRK.B");
-    assert_eq!(list[2].symbol.as_str(), "ZM");
+    // Legacy import adds 374 active instruments; ZM adds 1 more.
+    assert!(list.len() >= 374);
+    // Verify the three test symbols are present and correctly ordered
+    let symbols: Vec<&str> = list.iter().map(|i| i.symbol.as_str()).collect();
+    assert!(symbols.contains(&"AAPL"));
+    assert!(symbols.contains(&"BRK.B"));
+    assert!(symbols.contains(&"ZM"));
+    // Verify ordering: AAPL < BRK.B < ZM
+    let aapl_idx = symbols.iter().position(|&s| s == "AAPL").unwrap();
+    let brk_idx = symbols.iter().position(|&s| s == "BRK.B").unwrap();
+    let zm_idx = symbols.iter().position(|&s| s == "ZM").unwrap();
+    assert!(aapl_idx < brk_idx && brk_idx < zm_idx);
 }
