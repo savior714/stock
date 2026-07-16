@@ -215,22 +215,10 @@ impl DatabaseOpsExtended for crate::db::Database {
 }
 
 // ---------------------------------------------------------------------------
-// CancellationToken — stub for A-03 (cancellation support)
+// CancellationToken — re-export the real cancellation token from state
 // ---------------------------------------------------------------------------
 
-pub struct CancellationToken;
-
-impl Default for CancellationToken {
-    fn default() -> Self {
-        Self
-    }
-}
-
-impl CancellationToken {
-    pub fn is_cancelled(&self) -> bool {
-        false
-    }
-}
+pub use crate::state::CancellationToken;
 
 // ---------------------------------------------------------------------------
 // ScanService — single-symbol scan pipeline
@@ -276,14 +264,11 @@ where
         db: &mut dyn DatabaseOps,
     ) -> AppResult<ScanResult> {
         // 0. Check cancellation
-        {
-            let token = self.cancellation.lock().await;
-            if token.is_cancelled() {
-                return Err(AppError::new(
-                    AppErrorCode::Cancelled,
-                    format!("scan cancelled for symbol {}", symbol),
-                ));
-            }
+        if self.is_cancelled().await {
+            return Err(AppError::new(
+                AppErrorCode::Cancelled,
+                format!("scan cancelled for symbol {}", symbol),
+            ));
         }
 
         // 1. Validate symbol (already done by caller, but ensure)
@@ -742,7 +727,7 @@ mod tests {
     }
 
     fn make_cancellation() -> Arc<Mutex<CancellationToken>> {
-        Arc::new(Mutex::new(CancellationToken))
+        Arc::new(Mutex::new(CancellationToken::new()))
     }
 
     // ---- Tests ----
@@ -1170,7 +1155,7 @@ mod sequential_tests {
                 })
                 .collect(),
         );
-        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
         let service = ScanService::new(provider, cancellation);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
@@ -1235,7 +1220,7 @@ mod sequential_tests {
         let provider = FailingProvider {
             fail_on: vec!["GOOGL".to_string()],
         };
-        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
         let service = ScanService::new(provider, cancellation);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
@@ -1283,7 +1268,7 @@ mod sequential_tests {
         ];
         let conditions = vec![make_rsi_condition(14, 30.0)];
         let provider = AlwaysFailingProvider;
-        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
         let service = ScanService::new(provider, cancellation);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
@@ -1320,7 +1305,7 @@ mod sequential_tests {
                 })
                 .collect(),
         );
-        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
         let service = ScanService::new(provider, cancellation);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
@@ -1344,7 +1329,7 @@ mod sequential_tests {
         let symbols: Vec<crate::domain::Symbol> = vec![];
         let conditions = vec![make_rsi_condition(14, 30.0)];
         let provider = FakeProvider::new(vec![]);
-        let cancellation = Arc::new(Mutex::new(CancellationToken));
+        let cancellation = Arc::new(Mutex::new(CancellationToken::new()));
         let service = ScanService::new(provider, cancellation);
 
         let mut db = SequentialFakeDatabaseOps::new(symbols, conditions);
