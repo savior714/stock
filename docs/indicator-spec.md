@@ -53,22 +53,19 @@ lower = middle - multiplier * stddev
 
 ### 감지 가격
 
-`high_low`:
-
-- 하단 current: `low <= lower`
-- 상단 current: `high >= upper`
-
-`close`:
+MVP는 `close`로 고정한다.
 
 - 하단 current: `close <= lower`
 - 상단 current: `close >= upper`
+
+`high_low`(low ≤ lower / high ≥ upper)는 post-MVP 후보로 기록한다.
 
 ### cross
 
 하단:
 
-- 이전 bar는 선택한 감지 가격으로 lower를 터치하지 않았고
-- 현재 bar는 lower를 터치함
+- 이전 bar는 `close`가 lower를 터치하지 않았고 (`close > lower`)
+- 현재 bar는 `close <= lower`
 
 상단도 대칭적으로 정의한다. 이전 bar와 현재 bar의 band 값은 각 거래일의 rolling 결과를 사용한다.
 

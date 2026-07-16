@@ -268,6 +268,8 @@ pub struct ScanRun {
     pub total_symbols: u32,
     pub succeeded_symbols: u32,
     pub failed_symbols: u32,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -282,6 +284,18 @@ pub struct ScanResult {
     pub all_conditions_matched: bool,
     pub any_condition_matched: bool,
     pub data_stale: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanError {
+    pub run_id: ScanRunId,
+    pub symbol: Option<String>,
+    pub code: String,
+    pub message: String,
+    pub detail: Option<String>,
+    pub retryable: bool,
+    pub attempt: u32,
 }
 
 #[cfg(test)]

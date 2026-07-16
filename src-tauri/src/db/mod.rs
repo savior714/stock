@@ -6,7 +6,9 @@ use std::path::Path;
 const INITIAL_MIGRATION: &str = include_str!("../../migrations/0001_initial.sql");
 const CONDITION_TRIGGER_MODE_MIGRATION: &str =
     include_str!("../../migrations/0002_condition_trigger_modes.sql");
-const LATEST_SCHEMA_VERSION: i64 = 2;
+const SCAN_RUN_SNAPSHOTS_MIGRATION: &str =
+    include_str!("../../migrations/0003_scan_run_snapshots.sql");
+const LATEST_SCHEMA_VERSION: i64 = 3;
 
 pub struct Database {
     connection: Connection,
@@ -100,6 +102,18 @@ impl Database {
                         error.to_string(),
                     )
                 })?;
+            current_version = 2;
+        }
+
+        if current_version == 2 {
+            connection
+                .execute_batch(SCAN_RUN_SNAPSHOTS_MIGRATION)
+                .map_err(|error| {
+                    AppError::database(
+                        "failed to apply scan run snapshots migration",
+                        error.to_string(),
+                    )
+                })?;
         }
 
         Ok(Self { connection })
@@ -109,6 +123,34 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_column_name(connection: &Connection, table: &str, column: &str) -> Option<String> {
+        let mut stmt = connection
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("pragma query must prepare");
+        let mut rows = stmt.query([]).expect("pragma query must execute");
+        while let Some(row) = rows.next().expect("row must be readable") {
+            let name: String = row.get(1).expect("name must be readable");
+            if name == column {
+                return Some(name);
+            }
+        }
+        None
+    }
+
+    fn get_column_default(connection: &Connection, table: &str, column: &str) -> Option<String> {
+        let mut stmt = connection
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("pragma query must prepare");
+        let mut rows = stmt.query([]).expect("pragma query must execute");
+        while let Some(row) = rows.next().expect("row must be readable") {
+            let name: String = row.get(1).expect("name must be readable");
+            if name == column {
+                return row.get(4).ok();
+            }
+        }
+        None
+    }
 
     #[test]
     fn initializes_latest_schema_and_enables_foreign_keys() {
@@ -135,10 +177,20 @@ mod tests {
             )
             .expect("default preset conditions must be readable");
 
-        assert_eq!(database.schema_version().expect("version must exist"), 2);
+        // Verify v3 snapshot columns exist on scan_runs
+        let preset_snapshot_col =
+            get_column_name(database.connection(), "scan_runs", "preset_snapshot_json")
+                .expect("preset_snapshot_json column must exist");
+        let symbols_snapshot_col =
+            get_column_name(database.connection(), "scan_runs", "symbols_snapshot_json")
+                .expect("symbols_snapshot_json column must exist");
+
+        assert_eq!(database.schema_version().expect("version must exist"), 3);
         assert_eq!(foreign_keys, 1);
         assert_eq!(watchlists_table, "watchlists");
         assert_eq!(default_condition_count, 6);
+        assert_eq!(preset_snapshot_col, "preset_snapshot_json");
+        assert_eq!(symbols_snapshot_col, "symbols_snapshot_json");
     }
 
     #[test]
@@ -173,8 +225,87 @@ mod tests {
             )
             .expect("trigger mode must exist");
 
-        assert_eq!(database.schema_version().expect("version must exist"), 2);
+        // v3 snapshot columns must also exist after full migration chain
+        let retry_of_col = get_column_name(database.connection(), "scan_runs", "retry_of_run_id")
+            .expect("retry_of_run_id column must exist after v1->v2->v3");
+
+        assert_eq!(database.schema_version().expect("version must exist"), 3);
         assert_eq!(trigger_mode, "cross");
+        assert_eq!(retry_of_col, "retry_of_run_id");
+    }
+
+    #[test]
+    fn migrates_existing_version_two_database() {
+        let connection = Connection::open_in_memory().expect("database must open");
+        // Apply v1 then v2 manually to simulate existing v2 database
+        connection
+            .execute_batch(INITIAL_MIGRATION)
+            .expect("v1 migration must apply");
+        connection
+            .execute_batch(CONDITION_TRIGGER_MODE_MIGRATION)
+            .expect("v2 migration must apply");
+
+        // Insert data to verify preservation through v3 migration
+        connection
+            .execute(
+                "INSERT INTO watchlists (id, name) VALUES ('wl-1', 'Test Watchlist')",
+                [],
+            )
+            .expect("watchlist must insert");
+        connection
+            .execute(
+                "INSERT INTO scan_presets (id, name, trigger_mode) VALUES ('ps-1', 'Test Preset', 'cross')",
+                [],
+            )
+            .expect("preset must insert");
+
+        let database = Database::initialize(connection).expect("database must migrate v2->v3");
+
+        // Verify version reached 3
+        assert_eq!(database.schema_version().expect("version must exist"), 3);
+
+        // Verify existing data preserved
+        let watchlist_name: String = database
+            .connection()
+            .query_row("SELECT name FROM watchlists WHERE id = 'wl-1'", [], |row| {
+                row.get(0)
+            })
+            .expect("watchlist must be preserved");
+        let preset_name: String = database
+            .connection()
+            .query_row(
+                "SELECT name FROM scan_presets WHERE id = 'ps-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("preset must be preserved");
+        assert_eq!(watchlist_name, "Test Watchlist");
+        assert_eq!(preset_name, "Test Preset");
+
+        // Verify v3 columns exist with correct defaults
+        let preset_snapshot_default =
+            get_column_default(database.connection(), "scan_runs", "preset_snapshot_json")
+                .expect("preset_snapshot_json default must exist");
+        assert_eq!(preset_snapshot_default, "'{}'");
+    }
+
+    #[test]
+    fn rejects_newer_schema() {
+        let connection = Connection::open_in_memory().expect("database must open");
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 PRAGMA user_version = 99;",
+            )
+            .expect("user_version must be set");
+
+        let result = Database::initialize(connection);
+        assert!(result.is_err());
+        if let Err(error) = result {
+            assert_eq!(error.code, crate::error::AppErrorCode::Database);
+        } else {
+            panic!("expected error for newer schema");
+        }
     }
 
     #[test]

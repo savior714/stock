@@ -100,6 +100,7 @@ WAL mode와 foreign key를 활성화한다.
 
 ```text
 Watchlist + ScanPreset 선택
+→ 실행 시점 snapshot 고정 (preset 조건 JSON, symbol 목록 JSON)
 → DB에서 기존 bar 범위 확인
 → 필요한 날짜만 Yahoo 조회
 → 응답 검증 및 정규화
@@ -107,7 +108,8 @@ Watchlist + ScanPreset 선택
 → 계산에 필요한 연속 시계열 로드
 → 지표 계산
 → signal 평가
-→ 결과·오류 저장
+→ 결과·오류 저장 (trade_date 기록)
+→ run 종료 시 base_trade_date 지정, data_stale batch update
 → UI event 전송
 ```
 
@@ -118,6 +120,7 @@ Watchlist + ScanPreset 선택
 - 취소 token을 batch와 종목 처리 사이에서 확인한다.
 - DB write는 transaction 단위로 짧게 유지한다.
 - 동일 Watchlist에 대한 중복 scan 실행을 방지한다.
+- Retry는 기존 run을 변경하지 않고 새 run을 생성하며, `retry_of_run_id`로 원본을 참조 (ADR-0002)
 
 ## 8. 데이터 유효성
 
