@@ -92,3 +92,31 @@ fn rejects_preexisting_mixed_basis_series() {
 
     assert_eq!(error.code, AppErrorCode::Database);
 }
+
+#[test]
+fn rejects_invalid_calendar_dates() {
+    let mut database = Database::open_in_memory().expect("database must initialize");
+    insert_instrument(&mut database, "AAPL");
+    let mut repository = DailyBarRepository::new(&mut database);
+
+    for invalid_date in ["2026-02-29", "2026-04-31", "2026-13-01", "abcd-ef-gh"] {
+        let error = repository
+            .upsert_batch(&[bar("AAPL", invalid_date, PriceBasis::Raw, 100.0)])
+            .expect_err("invalid date must fail");
+        assert_eq!(error.code, AppErrorCode::Validation);
+    }
+
+    repository
+        .upsert_batch(&[bar("AAPL", "2024-02-29", PriceBasis::Raw, 100.0)])
+        .expect("leap day must be accepted");
+}
+
+#[test]
+fn rejects_invalid_or_reversed_load_range() {
+    let mut database = Database::open_in_memory().expect("database must initialize");
+    let repository = DailyBarRepository::new(&mut database);
+    let symbol = Symbol::new("AAPL").expect("symbol must be valid");
+
+    assert!(repository.load_range(&symbol, "2026-02-29", "2026-03-01").is_err());
+    assert!(repository.load_range(&symbol, "2026-07-16", "2026-07-15").is_err());
+}
