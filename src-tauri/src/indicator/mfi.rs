@@ -1,19 +1,16 @@
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 use super::{assert_lengths_match, empty_output, validate_period, IndicatorOutput};
 
-/// Calculate Money Flow Index (MFI) using Wilder smoothing.
+/// Calculate Money Flow Index (MFI) from a fixed rolling window.
 ///
 /// - Typical Price = `(high + low + close) / 3`
-/// - Raw Money Flow = `typical_price * volume` (f64)
+/// - Raw Money Flow = `typical_price * volume`
 /// - Typical price > previous → positive flow; < previous → negative flow; equal → neither.
-/// - Wilder smoothing (same as RSI).
+/// - Each value uses the most recent `period` classified money-flow entries.
 /// - Negative flow = 0, positive > 0 → 100.
 /// - Both zero → 50.
-/// - First valid value at index `period` (0-indexed); indices `0..period` are `None`.
-///
-/// Input: `high`, `low`, `close` (each `&[f64]`), `volume: &[u64]`, `period: u32`.
-/// Output: `IndicatorOutput` of same length as input.
+/// - First valid value is at index `period`; the preceding positions are `None`.
 pub fn calculate_mfi(
     highs: &[f64],
     lows: &[f64],
@@ -24,63 +21,71 @@ pub fn calculate_mfi(
     validate_period(period)?;
     assert_lengths_match(&[highs.len(), lows.len(), closes.len(), volumes.len()])?;
 
+    if highs
+        .iter()
+        .chain(lows)
+        .chain(closes)
+        .any(|value| !value.is_finite())
+    {
+        return Err(AppError::validation(
+            "MFI price inputs must be finite (no NaN or infinity)",
+        ));
+    }
+
     let period = period as usize;
     let len = highs.len();
     let mut output = empty_output(len);
 
-    // Need at least period + 1 bars to compute one MFI value.
     if len < period + 1 {
         return Ok(output);
     }
 
-    // Compute typical prices
-    let typical: Vec<f64> = highs
+    let typical_prices: Vec<f64> = highs
         .iter()
-        .zip(lows.iter())
-        .zip(closes.iter())
-        .map(|((&h, &l), &c)| (h + l + c) / 3.0)
+        .zip(lows)
+        .zip(closes)
+        .map(|((&high, &low), &close)| (high + low + close) / 3.0)
         .collect();
 
-    // Compute raw money flow and classify into positive/negative
-    let mut pos_flow: Vec<f64> = vec![0.0; len];
-    let mut neg_flow: Vec<f64> = vec![0.0; len];
+    let mut positive_flow = vec![0.0; len];
+    let mut negative_flow = vec![0.0; len];
 
-    for i in 1..len {
-        let raw = typical[i] * volumes[i] as f64;
-        if typical[i] > typical[i - 1] {
-            pos_flow[i] = raw;
-        } else if typical[i] < typical[i - 1] {
-            neg_flow[i] = raw;
+    for index in 1..len {
+        let raw_flow = typical_prices[index] * volumes[index] as f64;
+        if !raw_flow.is_finite() {
+            return Err(AppError::validation("MFI raw money flow must be finite"));
         }
-        // equal → neither
+
+        if typical_prices[index] > typical_prices[index - 1] {
+            positive_flow[index] = raw_flow;
+        } else if typical_prices[index] < typical_prices[index - 1] {
+            negative_flow[index] = raw_flow;
+        }
     }
 
-    // First average: simple mean of first `period` flow values (indices 1..=period)
-    let mut avg_pos = pos_flow[1..=period].iter().sum::<f64>() / period as f64;
-    let mut avg_neg = neg_flow[1..=period].iter().sum::<f64>() / period as f64;
+    let mut positive_sum = positive_flow[1..=period].iter().sum::<f64>();
+    let mut negative_sum = negative_flow[1..=period].iter().sum::<f64>();
+    output[period] = Some(compute_mfi_value(positive_sum, negative_sum));
 
-    // MFI at index `period`
-    output[period] = Some(compute_mfi_value(avg_pos, avg_neg));
-
-    // Wilder smoothing for subsequent indices
-    for i in (period + 1)..len {
-        avg_pos = (avg_pos * (period - 1) as f64 + pos_flow[i]) / period as f64;
-        avg_neg = (avg_neg * (period - 1) as f64 + neg_flow[i]) / period as f64;
-        output[i] = Some(compute_mfi_value(avg_pos, avg_neg));
+    for index in (period + 1)..len {
+        let expired_index = index - period;
+        positive_sum += positive_flow[index] - positive_flow[expired_index];
+        negative_sum += negative_flow[index] - negative_flow[expired_index];
+        output[index] = Some(compute_mfi_value(positive_sum, negative_sum));
     }
 
     Ok(output)
 }
 
-/// Compute MFI value from smoothed positive and negative money flow.
-fn compute_mfi_value(avg_pos: f64, avg_neg: f64) -> f64 {
-    if avg_neg == 0.0 {
-        if avg_pos > 0.0 {
+fn compute_mfi_value(positive_sum: f64, negative_sum: f64) -> f64 {
+    if negative_sum == 0.0 {
+        if positive_sum > 0.0 {
             return 100.0;
         }
-        return 50.0; // both zero
+        return 50.0;
     }
-    let ratio = avg_pos / avg_neg;
+
+    let ratio = positive_sum / negative_sum;
     100.0 - (100.0 / (1.0 + ratio))
 }
 
@@ -88,200 +93,117 @@ fn compute_mfi_value(avg_pos: f64, avg_neg: f64) -> f64 {
 mod tests {
     use super::*;
 
-    // ---- positive-only: typical price keeps rising → 100 ----
-
     #[test]
-    fn positive_only_mfi_100() {
-        // Monotonically increasing typical price → all positive flow
-        let highs: Vec<f64> = (10..=30).map(|v| v as f64).collect();
-        let lows: Vec<f64> = (0..=20).map(|v| v as f64).collect();
-        let closes: Vec<f64> = (5..=25).map(|v| v as f64).collect();
-        let volumes = vec![100u64; 21];
-        let period: usize = 5;
-
+    fn positive_only_mfi_is_one_hundred() {
+        let highs: Vec<f64> = (10..=30).map(|value| value as f64).collect();
+        let lows: Vec<f64> = (0..=20).map(|value| value as f64).collect();
+        let closes: Vec<f64> = (5..=25).map(|value| value as f64).collect();
+        let volumes = vec![100_u64; 21];
         let result = calculate_mfi(&highs, &lows, &closes, &volumes, 5).unwrap();
-        assert_eq!(result.len(), 21);
 
-        for (i, val) in result.iter().enumerate().take(period) {
-            assert!(val.is_none(), "index {} should be None", i);
+        for value in result.iter().take(5) {
+            assert!(value.is_none());
         }
-        for (i, val) in result.iter().enumerate().skip(period) {
-            let v = val.unwrap();
-            assert!(
-                (v - 100.0).abs() < 1e-9,
-                "index {} expected 100, got {}",
-                i,
-                v
-            );
+        for value in result.iter().skip(5) {
+            assert_eq!(*value, Some(100.0));
         }
     }
 
-    // ---- negative-only: typical price keeps falling → 0 ----
-
     #[test]
-    fn negative_only_mfi_0() {
-        // Monotonically decreasing typical price → all negative flow
-        let highs: Vec<f64> = (0..=20).map(|v| (30 - v) as f64).collect();
-        let lows: Vec<f64> = (0..=20).map(|v| (20 - v) as f64).collect();
-        let closes: Vec<f64> = (0..=20).map(|v| (25 - v) as f64).collect();
-        let volumes = vec![100u64; 21];
-        let period: usize = 5;
-
+    fn negative_only_mfi_is_zero() {
+        let highs: Vec<f64> = (0..=20).map(|value| (30 - value) as f64).collect();
+        let lows: Vec<f64> = (0..=20).map(|value| (20 - value) as f64).collect();
+        let closes: Vec<f64> = (0..=20).map(|value| (25 - value) as f64).collect();
+        let volumes = vec![100_u64; 21];
         let result = calculate_mfi(&highs, &lows, &closes, &volumes, 5).unwrap();
-        for (i, val) in result.iter().enumerate().take(period) {
-            assert!(val.is_none(), "index {} should be None", i);
+
+        for value in result.iter().take(5) {
+            assert!(value.is_none());
         }
-        for (i, val) in result.iter().enumerate().skip(period) {
-            let v = val.unwrap();
-            assert!((v - 0.0).abs() < 1e-9, "index {} expected 0, got {}", i, v);
+        for value in result.iter().skip(5) {
+            assert_eq!(*value, Some(0.0));
         }
     }
 
-    // ---- flat: typical price unchanged → 50 ----
-
     #[test]
-    fn flat_price_mfi_50() {
-        let highs = vec![10.0; 30];
-        let lows = vec![8.0; 30];
-        let closes = vec![9.0; 30];
-        let volumes = vec![100u64; 30];
-        let period: usize = 5;
+    fn flat_or_zero_volume_mfi_is_fifty() {
+        let highs = vec![10.0; 10];
+        let lows = vec![8.0; 10];
+        let closes = vec![9.0; 10];
+        let volumes = vec![0_u64; 10];
+        let result = calculate_mfi(&highs, &lows, &closes, &volumes, 3).unwrap();
 
-        let result = calculate_mfi(&highs, &lows, &closes, &volumes, 5).unwrap();
-        for val in result.iter().take(period) {
-            assert!(val.is_none());
-        }
-        for (i, val) in result.iter().enumerate().skip(period) {
-            let v = val.unwrap();
-            assert!(
-                (v - 50.0).abs() < 1e-9,
-                "index {} expected 50, got {}",
-                i,
-                v
-            );
+        for value in result.iter().skip(3) {
+            assert_eq!(*value, Some(50.0));
         }
     }
 
-    // ---- zero volume: positive/negative both 0 → 50 ----
-
     #[test]
-    fn zero_volume_mfi_50() {
-        // Price changes but volume is always 0 → raw money flow = 0
-        let highs = vec![10.0, 12.0, 11.0, 13.0, 12.0, 14.0];
-        let lows = vec![8.0, 10.0, 9.0, 11.0, 10.0, 12.0];
-        let closes = vec![9.0, 11.0, 10.0, 12.0, 11.0, 13.0];
-        let volumes = vec![0u64; 6];
-        let period: usize = 2;
-
+    fn rolling_window_expires_old_positive_flow() {
+        let highs = vec![11.0, 13.0, 15.0, 14.0, 13.0];
+        let lows = vec![9.0, 11.0, 13.0, 12.0, 11.0];
+        let closes = vec![10.0, 12.0, 14.0, 13.0, 12.0];
+        let volumes = vec![100_u64; 5];
         let result = calculate_mfi(&highs, &lows, &closes, &volumes, 2).unwrap();
-        for val in result.iter().take(period) {
-            assert!(val.is_none());
-        }
-        for (i, val) in result.iter().enumerate().skip(period) {
-            let v = val.unwrap();
-            assert!(
-                (v - 50.0).abs() < 1e-9,
-                "index {} expected 50 (zero volume), got {}",
-                i,
-                v
-            );
-        }
+
+        assert_eq!(result[2], Some(100.0));
+        let expected_middle = 1_400.0 / (1_400.0 + 1_300.0) * 100.0;
+        assert!((result[3].unwrap() - expected_middle).abs() < 1e-9);
+        assert_eq!(result[4], Some(0.0));
     }
 
-    // ---- warm-up boundary: period=14, index 0..13 are None ----
-
     #[test]
-    fn warmup_boundary_period_14() {
-        let n = 20;
-        let highs: Vec<f64> = (0..n).map(|v| 100.0 + v as f64 * 2.0).collect();
-        let lows: Vec<f64> = (0..n).map(|v| 90.0 + v as f64 * 2.0).collect();
-        let closes: Vec<f64> = (0..n).map(|v| 95.0 + v as f64 * 2.0).collect();
-        let volumes = vec![100u64; n];
-
-        let result = calculate_mfi(&highs, &lows, &closes, &volumes, 14).unwrap();
-        assert_eq!(result.len(), n);
-        for (i, val) in result.iter().enumerate().take(14) {
-            assert!(val.is_none(), "index {} should be None", i);
-        }
-        assert!(result[14].is_some(), "index 14 should be Some");
-        assert!(result[15].is_some());
-    }
-
-    // ---- slice length mismatch → error ----
-
-    #[test]
-    fn rejects_mismatched_lengths() {
-        let highs = vec![10.0; 15];
-        let lows = vec![8.0; 15];
-        let closes = vec![9.0; 14]; // one short
-        let volumes = vec![100u64; 15];
-
-        assert!(calculate_mfi(&highs, &lows, &closes, &volumes, 5).is_err());
-    }
-
-    // ---- known fixture (period=3, hand-calculated) ----
-
-    #[test]
-    fn known_fixture_period_3() {
-        // highs  = [10, 12, 11, 13, 12, 14]
-        // lows   = [8,  10, 9,  11, 10, 12]
-        // closes = [9,  11, 10, 12, 11, 13]
-        // volumes = [100; 6]
-        //
-        // typical = [9, 11, 10, 12, 11, 13]
-        // raw     = [900, 1100, 1000, 1200, 1100, 1300]
-        // change:  i=1 up, i=2 down, i=3 up, i=4 down, i=5 up
-        // pos: [0, 1100, 0, 1200, 0, 1300]
-        // neg: [0, 0, 1000, 0, 1100, 0]
-        //
-        // period=3 (floating-point, verified by running):
-        //   i=3: 69.697
-        //   i=4: 46.465
-        //   i=5: 66.349
-
+    fn known_fixture_period_three() {
         let highs = vec![10.0, 12.0, 11.0, 13.0, 12.0, 14.0];
         let lows = vec![8.0, 10.0, 9.0, 11.0, 10.0, 12.0];
         let closes = vec![9.0, 11.0, 10.0, 12.0, 11.0, 13.0];
-        let volumes = vec![100u64; 6];
-
+        let volumes = vec![100_u64; 6];
         let result = calculate_mfi(&highs, &lows, &closes, &volumes, 3).unwrap();
 
         assert!(result[0].is_none());
         assert!(result[1].is_none());
         assert!(result[2].is_none());
-
-        assert!((result[3].unwrap() - 69.697).abs() < 1e-2);
-        assert!((result[4].unwrap() - 46.465).abs() < 1e-2);
-        assert!((result[5].unwrap() - 66.349).abs() < 1e-2);
+        assert!((result[3].unwrap() - 69.696_969_696_969_7).abs() < 1e-9);
+        assert!((result[4].unwrap() - 36.363_636_363_636_37).abs() < 1e-9);
+        assert!((result[5].unwrap() - 69.444_444_444_444_44).abs() < 1e-9);
     }
 
-    // ---- insufficient data returns all None ----
+    #[test]
+    fn warmup_boundary_period_fourteen() {
+        let count = 20;
+        let highs: Vec<f64> = (0..count).map(|value| 100.0 + value as f64 * 2.0).collect();
+        let lows: Vec<f64> = (0..count).map(|value| 90.0 + value as f64 * 2.0).collect();
+        let closes: Vec<f64> = (0..count).map(|value| 95.0 + value as f64 * 2.0).collect();
+        let volumes = vec![100_u64; count];
+        let result = calculate_mfi(&highs, &lows, &closes, &volumes, 14).unwrap();
+
+        for value in result.iter().take(14) {
+            assert!(value.is_none());
+        }
+        assert!(result[14].is_some());
+    }
 
     #[test]
     fn insufficient_data_returns_all_none() {
-        // period=5 needs at least 6 bars, but we only have 5
         let highs = vec![10.0; 5];
         let lows = vec![8.0; 5];
         let closes = vec![9.0; 5];
-        let volumes = vec![100u64; 5];
-
+        let volumes = vec![100_u64; 5];
         let result = calculate_mfi(&highs, &lows, &closes, &volumes, 5).unwrap();
-        assert!(result.iter().all(|v| v.is_none()));
+
+        assert!(result.iter().all(Option::is_none));
     }
 
-    // ---- exactly period+1 bars → one valid value ----
-
     #[test]
-    fn exactly_period_plus_one() {
-        // period=2, 3 bars → one MFI value at index 2
-        let highs = vec![10.0, 12.0, 11.0];
-        let lows = vec![8.0, 10.0, 9.0];
-        let closes = vec![9.0, 11.0, 10.0];
-        let volumes = vec![100u64; 3];
-
-        let result = calculate_mfi(&highs, &lows, &closes, &volumes, 2).unwrap();
-        assert!(result[0].is_none());
-        assert!(result[1].is_none());
-        assert!(result[2].is_some());
+    fn rejects_mismatched_or_non_finite_inputs() {
+        assert!(calculate_mfi(&[10.0; 4], &[8.0; 4], &[9.0; 3], &[100; 4], 2).is_err());
+        assert!(calculate_mfi(
+            &[10.0, f64::NAN, 12.0],
+            &[8.0, 9.0, 10.0],
+            &[9.0, 10.0, 11.0],
+            &[100; 3],
+            2,
+        )
+        .is_err());
     }
 }
