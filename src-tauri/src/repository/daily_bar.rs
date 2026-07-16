@@ -17,21 +17,19 @@ impl<'connection> DailyBarRepository<'connection> {
 
     /// Batch upsert multiple bars in one transaction.
     /// Duplicate (symbol, trade_date) is overwritten.
-    /// Rejects if bars for the same symbol mix different price_basis values.
+    /// Rejects when a symbol mixes price bases inside the batch or with stored rows.
     pub fn upsert_batch(&mut self, bars: &[DailyBar]) -> AppResult<()> {
         if bars.is_empty() {
             return Ok(());
         }
 
-        // Validate all bars before any DB operation
         for bar in bars {
             bar.validate()?;
         }
 
-        // Check that all bars for the same symbol share the same price_basis
-        let mut basis_map: HashMap<&str, PriceBasis> = HashMap::new();
+        let mut basis_by_symbol: HashMap<&str, PriceBasis> = HashMap::new();
         for bar in bars {
-            if let Some(&existing) = basis_map.get(bar.symbol.as_str()) {
+            if let Some(&existing) = basis_by_symbol.get(bar.symbol.as_str()) {
                 if existing != bar.price_basis {
                     return Err(AppError::validation(format!(
                         "bars for {} mix different price_basis values",
@@ -39,7 +37,7 @@ impl<'connection> DailyBarRepository<'connection> {
                     )));
                 }
             } else {
-                basis_map.insert(bar.symbol.as_str(), bar.price_basis);
+                basis_by_symbol.insert(bar.symbol.as_str(), bar.price_basis);
             }
         }
 
@@ -48,12 +46,43 @@ impl<'connection> DailyBarRepository<'connection> {
             .transaction()
             .map_err(|error| db_error("failed to start DailyBar upsert transaction", error))?;
 
+        for (&symbol, &incoming_basis) in &basis_by_symbol {
+            let (basis_count, stored_basis): (i64, Option<String>) = transaction
+                .query_row(
+                    "SELECT COUNT(DISTINCT price_basis), MIN(price_basis)
+                     FROM daily_bars
+                     WHERE symbol = ?1",
+                    params![symbol],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|error| db_error("failed to inspect stored DailyBar price basis", error))?;
+
+            if basis_count > 1 {
+                return Err(AppError::database(
+                    "stored DailyBar rows mix price_basis values",
+                    symbol.to_string(),
+                ));
+            }
+
+            if let Some(stored_basis) = stored_basis {
+                let stored_basis = parse_price_basis(&stored_basis)?;
+                if stored_basis != incoming_basis {
+                    return Err(AppError::validation(format!(
+                        "bars for {symbol} use {}, but stored rows use {}",
+                        price_basis_db_value(incoming_basis),
+                        price_basis_db_value(stored_basis)
+                    )));
+                }
+            }
+        }
+
         for bar in bars {
             transaction
                 .execute(
                     "INSERT INTO daily_bars (symbol, trade_date, price_basis, open, high, low, close, volume)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(symbol, trade_date) DO UPDATE SET
+                       price_basis = excluded.price_basis,
                        open = excluded.open,
                        high = excluded.high,
                        low = excluded.low,
@@ -184,3 +213,7 @@ fn db_error(message: &'static str, error: rusqlite::Error) -> AppError {
 #[cfg(test)]
 #[path = "daily_bar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "daily_bar_basis_tests.rs"]
+mod basis_tests;
