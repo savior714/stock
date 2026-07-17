@@ -1,39 +1,40 @@
-.setup-area {
+.setupArea {
   display: grid;
   gap: 14px;
 }
 
-.setup-context {
+.setupContext {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  margin-bottom: 4px;
 }
 
-.setup-context-name {
+.setupContextName {
+  margin: 0;
   font-size: 15px;
   font-weight: 600;
   color: var(--color-text-primary);
-  margin: 0;
 }
 
-.setup-context-meta {
+.setupContextMeta {
+  margin: 2px 0 0;
   font-size: 12px;
   color: var(--color-text-tertiary);
 }
 
-.setup-context-actions {
+.setupContextActions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  align-self: center;
 }
 
-.setup-controls {
+.setupControls {
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -42,18 +43,18 @@
   border-radius: 10px;
 }
 
-.setup-select-group {
+.setupSelectGroup {
   display: grid;
   gap: 5px;
 }
 
-.setup-select-group label {
+.setupSelectGroup label {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
 }
 
-.setup-select-group select {
+.setupSelectGroup select {
   width: 100%;
   min-height: 38px;
   padding: 7px 10px;
@@ -67,17 +68,17 @@
   appearance: auto;
 }
 
-.setup-select-group select:focus {
+.setupSelectGroup select:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 
-.setup-select-group select:disabled {
+.setupSelectGroup select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.setup-info {
+.setupInfo {
   display: flex;
   gap: 16px;
   font-size: 12px;
@@ -85,20 +86,20 @@
   padding: 0 4px;
 }
 
-.setup-actions {
+.setupActions {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.setup-progress {
+.setupProgress {
   padding: 14px 16px;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
   border-radius: 8px;
 }
 
-.setup-progress-header {
+.setupProgressHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -106,13 +107,13 @@
   margin-bottom: 8px;
 }
 
-.setup-progress-status {
+.setupProgressStatus {
   font-size: 12px;
   color: var(--color-text-tertiary);
   font-weight: 500;
 }
 
-.setup-progress-badge {
+.setupProgressBadge {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
@@ -121,32 +122,32 @@
   font-weight: 500;
 }
 
-.setup-progress-current {
+.setupProgressCurrent {
   font-size: 12px;
   color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
 
-.setup-progress-current strong {
+.setupProgressCurrent strong {
   color: var(--color-text-primary);
   font-weight: 600;
 }
 
-.setup-progress-bar-track {
+.setupProgressBarTrack {
   height: 6px;
   border-radius: 3px;
   background: var(--color-surface);
   overflow: hidden;
 }
 
-.setup-progress-bar-fill {
+.setupProgressBarFill {
   height: 100%;
   border-radius: 3px;
   background: var(--color-accent);
   transition: width 200ms ease;
 }
 
-.setup-progress-meta {
+.setupProgressMeta {
   display: flex;
   gap: 14px;
   font-size: 12px;
@@ -154,23 +155,23 @@
   margin-top: 6px;
 }
 
-.setup-errors {
+.setupErrors {
   margin-top: 12px;
 }
 
-.setup-errors h4 {
+.setupErrors h4 {
   margin: 0 0 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-danger);
 }
 
-.setup-error-list {
+.setupErrorList {
   display: grid;
   gap: 6px;
 }
 
-.setup-error-item {
+.setupErrorItem {
   font-size: 12px;
   padding: 8px 10px;
   border: 1px solid var(--color-border);
@@ -179,16 +180,16 @@
   color: var(--color-text-primary);
 }
 
-.setup-error-item strong {
+.setupErrorItem strong {
   font-weight: 600;
 }
 
-.setup-error-item .error-detail {
+.setupErrorItemDetail {
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
 
-.setup-completion {
+.setupCompletion {
   padding: 14px 16px;
   background: var(--color-success-soft);
   border: 1px solid var(--color-border-strong);
@@ -196,20 +197,20 @@
   margin-top: 12px;
 }
 
-.setup-completion h4 {
+.setupCompletion h4 {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 600;
   color: var(--color-success);
 }
 
-.setup-completion p {
+.setupCompletion p {
   margin: 0;
   font-size: 12px;
   color: var(--color-text-secondary);
 }
 
-.setup-empty-select {
+.setupEmptySelect {
   min-height: 50px;
   display: grid;
   place-content: center;
@@ -223,7 +224,7 @@
   margin-bottom: 8px;
 }
 
-.setup-loading {
+.setupLoading {
   padding: 16px;
   text-align: center;
   color: var(--color-text-tertiary);

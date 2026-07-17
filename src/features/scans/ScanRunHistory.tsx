@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatAppError } from "@/lib/app-error";
 import { getScanRun, listScanRuns } from "./api";
 import type { ScanRunDetail, ScanRunSummary } from "./types";
+import styles from "./ScanRunHistory.module.css";
 
 type ScanRunHistoryProps = {
   onRunSelect: (run: ScanRunDetail) => void;
@@ -19,13 +20,13 @@ type HistoryState = {
 
 const STATUS_CONFIG: Record<
   ScanRunSummary["status"],
-  { bg: string; color: string; label: string }
+  { bgClass: string; label: string }
 > = {
-  pending: { bg: "#2a2818", color: "#e5c07b", label: "Pending" },
-  running: { bg: "#14263a", color: "#7eb8e5", label: "Running" },
-  completed: { bg: "#14261f", color: "#a7e5c8", label: "Completed" },
-  cancelled: { bg: "#2a1f14", color: "#e5a87b", label: "Cancelled" },
-  failed: { bg: "#2a171b", color: "#ffb4be", label: "Failed" },
+  pending: { bgClass: styles.statusPending, label: "Pending" },
+  running: { bgClass: styles.statusRunning, label: "Running" },
+  completed: { bgClass: styles.statusCompleted, label: "Completed" },
+  cancelled: { bgClass: styles.statusCancelled, label: "Cancelled" },
+  failed: { bgClass: styles.statusFailed, label: "Failed" },
 };
 
 function formatTimestamp(iso: string | null): string {
@@ -100,77 +101,45 @@ export default function ScanRunHistory({ onRunSelect }: ScanRunHistoryProps) {
 
   if (state.isLoading) {
     return (
-      <div style={{ padding: "20px" }}>
-        <p className="muted" style={{ textAlign: "center", padding: "20px 0" }}>
-          Loading run history\u2026
-        </p>
+      <div className={styles.loading}>
+        <p className={styles.mutedCenter}>Loading run history…</p>
       </div>
     );
   }
 
   if (state.globalError) {
     return (
-      <div style={{ padding: "20px" }}>
-        <p style={{ color: "#ffb4be", padding: "20px 0" }}>{state.globalError}</p>
+      <div className={styles.loading}>
+        <p className={styles.errorText}>{state.globalError}</p>
       </div>
     );
   }
 
   if (state.runs.length === 0) {
     return (
-      <div style={{ padding: "20px" }}>
+      <div className={styles.loading}>
         <div className="empty-state" style={{ minHeight: "120px" }}>
-          <p className="muted" style={{ textAlign: "center" }}>
-            No scan runs yet. Start a scan to see history.
-          </p>
+          <p className={styles.mutedCenter}>No scan runs yet. Start a scan to see history.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "0 0 12px 0", overflow: "hidden" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "16px 14px 12px 14px",
-          borderBottom: "1px solid #242b39",
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: "#c9d4e7" }}>
+    <div className={styles.historyContainer}>
+      <div className={styles.historyHeader}>
+        <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 600 }}>
           Run History
         </h3>
         <button
           onClick={loadRuns}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "4px",
-            padding: "4px 12px",
-            borderRadius: "8px",
-            border: "1px solid #303848",
-            background: "#171c26",
-            color: "#8f98aa",
-            fontSize: "12px",
-            fontWeight: 500,
-            cursor: "pointer",
-            outline: "none",
-            transition: "background 120ms ease",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "#202838";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "#171c26";
-          }}
+          className={styles.refreshButton}
         >
           Refresh
         </button>
       </div>
 
-      <div style={{ padding: "12px 14px" }}>
+      <div className={styles.historyList}>
         {state.runs.map((run) => {
           const isSelected = state.selectedRun?.id === run.id;
           const config = STATUS_CONFIG[run.status];
@@ -178,100 +147,42 @@ export default function ScanRunHistory({ onRunSelect }: ScanRunHistoryProps) {
           return (
             <div
               key={run.id}
+              className={`${styles.historyItem}${isSelected ? ` ${styles.historyItemSelected}` : ""}`}
               onClick={() => handleSelectRun(run)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                padding: "12px 14px",
-                marginBottom: "8px",
-                borderRadius: "12px",
-                border: `1px solid ${isSelected ? "#7185a8" : "#242b39"}`,
-                background: isSelected ? "#202838" : "#171c26",
-                cursor: "pointer",
-                transition: "background 120ms ease, border-color 120ms ease",
-              }}
-              onMouseEnter={(e) => {
-                if (!isSelected) {
-                  (e.currentTarget as HTMLDivElement).style.background = "#202838";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected) {
-                  (e.currentTarget as HTMLDivElement).style.background = "#171c26";
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleSelectRun(run);
                 }
               }}
             >
-              <span
-                style={{
-                  display: "inline-block",
-                  borderRadius: "999px",
-                  padding: "2px 8px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  background: config.bg,
-                  color: config.color,
-                  whiteSpace: "nowrap",
-                  minWidth: "72px",
-                  textAlign: "center",
-                }}
-              >
+              <span className={`${styles.statusBadge} ${config.bgClass}`}>
                 {config.label}
               </span>
 
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+              <div className={styles.historyItemInfo}>
+                <div className={styles.historyItemId}>
                   {truncateId(run.id, 12)}
                 </div>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    color: "#8f98aa",
-                    marginTop: "2px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {run.watchlistId} \u00b7 {run.presetId}
+                <div className={styles.historyItemMeta}>
+                  {run.watchlistId} · {run.presetId}
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  gap: "12px",
-                  fontSize: "13px",
-                  color: "#8f98aa",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <div className={styles.historyItemStats}>
                 <span>
                   {run.succeededSymbols}/{run.totalSymbols}
                 </span>
                 {run.failedSymbols > 0 ? (
-                  <span style={{ color: "#ffb4be" }}>{run.failedSymbols} failed</span>
+                  <span className={styles.failedCount}>
+                    {run.failedSymbols} failed
+                  </span>
                 ) : null}
               </div>
 
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  whiteSpace: "nowrap",
-                  minWidth: "70px",
-                  textAlign: "right",
-                }}
-              >
+              <div className={styles.historyItemTime}>
                 {formatTimestamp(run.startedAt ?? run.finishedAt)}
               </div>
             </div>
@@ -280,62 +191,30 @@ export default function ScanRunHistory({ onRunSelect }: ScanRunHistoryProps) {
       </div>
 
       {state.selectedRun && (
-        <div
-          style={{
-            padding: "14px",
-            borderTop: "1px solid #242b39",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "8px 16px",
-              fontSize: "13px",
-            }}
-          >
+        <div className={styles.historyDetail}>
+          <div className={styles.detailGrid}>
             <div>
-              <span style={{ color: "#8f98aa", fontSize: "12px" }}>Base trade date</span>
-              <div style={{ color: "#c9d4e7", marginTop: "2px" }}>
+              <span className={styles.detailLabel}>Base trade date</span>
+              <div className={styles.detailValue}>
                 {state.selectedRun.baseTradeDate ?? "\u2014"}
               </div>
             </div>
             <div>
-              <span style={{ color: "#8f98aa", fontSize: "12px" }}>Symbols</span>
-              <div style={{ color: "#c9d4e7", marginTop: "2px" }}>
+              <span className={styles.detailLabel}>Symbols</span>
+              <div className={styles.detailValue}>
                 {state.selectedRun.totalSymbols}
               </div>
             </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <span style={{ color: "#8f98aa", fontSize: "12px" }}>Preset snapshot</span>
-              <div
-                style={{
-                  color: "#c9d4e7",
-                  marginTop: "2px",
-                  fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                  fontSize: "12px",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
+            <div className={styles.detailFull}>
+              <span className={styles.detailLabel}>Preset snapshot</span>
+              <div className={`${styles.detailValue} ${styles.detailMonospace}`}>
                 {JSON.stringify(state.selectedRun.presetSnapshotJson)}
               </div>
             </div>
             {state.selectedRun.retryOfRunId && (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <span style={{ color: "#8f98aa", fontSize: "12px" }}>Retry of</span>
-                <div
-                  style={{
-                    color: "#c9d4e7",
-                    marginTop: "2px",
-                    fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                    fontSize: "12px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+              <div className={styles.detailFull}>
+                <span className={styles.detailLabel}>Retry of</span>
+                <div className={`${styles.detailValue} ${styles.detailMonospace}`}>
                   {state.selectedRun.retryOfRunId}
                 </div>
               </div>

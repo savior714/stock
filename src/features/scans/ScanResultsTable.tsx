@@ -5,12 +5,7 @@ import { useState, useMemo } from "react";
 import type { ScanResult } from "./types";
 import { filterResults, sortResults, filterByMatchMode } from "./model";
 import type { ResultFilter, ResultSort } from "./model";
-
-type ScanResultsTableProps = {
-  results: ScanResult[];
-  runId: string;
-  isLoading?: boolean;
-};
+import styles from "./ScanResultsTable.module.css";
 
 const SORT_OPTIONS: { value: ResultSort["field"]; label: string }[] = [
   { value: "symbol", label: "Symbol" },
@@ -31,7 +26,11 @@ function matchedCount(result: ScanResult): number {
   return [result.allConditionsMatched, result.anyConditionMatched].filter(Boolean).length;
 }
 
-export default function ScanResultsTable({ results, runId, isLoading }: ScanResultsTableProps) {
+export default function ScanResultsTable({ results, runId, isLoading }: {
+  results: ScanResult[];
+  runId: string;
+  isLoading?: boolean;
+}) {
   const [matchMode, setMatchMode] = useState<"and" | "or" | "none">("none");
   const [includeStale, setIncludeStale] = useState(true);
   const [symbolFilter, setSymbolFilter] = useState("");
@@ -40,12 +39,20 @@ export default function ScanResultsTable({ results, runId, isLoading }: ScanResu
 
   const filtered = useMemo(
     () =>
-      filterResults(results, { matchMode, includeStale, symbolFilter: symbolFilter || undefined }),
+      filterResults(results, {
+        matchMode,
+        includeStale,
+        symbolFilter: symbolFilter || undefined,
+      }),
     [results, matchMode, includeStale, symbolFilter],
   );
 
   const filteredByMode = useMemo(
-    () => filterByMatchMode(filtered, matchMode === "none" ? "none" : matchMode),
+    () =>
+      filterByMatchMode(
+        filtered,
+        matchMode === "none" ? "none" : matchMode,
+      ),
     [filtered, matchMode],
   );
 
@@ -70,23 +77,21 @@ export default function ScanResultsTable({ results, runId, isLoading }: ScanResu
 
   if (isLoading) {
     return (
-      <div className="panel" style={{ padding: "20px" }}>
+      <div className="panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Scan results</p>
             <h3>Results for Run {runId}</h3>
           </div>
         </div>
-        <p className="muted" style={{ padding: "20px 0", textAlign: "center" }}>
-          Loading results\u2026
-        </p>
+        <p className={styles.mutedCenter}>Loading results…</p>
       </div>
     );
   }
 
   if (results.length === 0) {
     return (
-      <div className="panel" style={{ padding: "20px" }}>
+      <div className="panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Scan results</p>
@@ -102,50 +107,23 @@ export default function ScanResultsTable({ results, runId, isLoading }: ScanResu
   }
 
   return (
-    <div className="panel scan-results-table" style={{ padding: "0 0 12px 0", overflow: "hidden" }}>
-      <div className="panel-heading" style={{ padding: "20px 20px 0 20px" }}>
+    <div className={`panel ${styles.scanResultsTable}`}>
+      <div className="panel-heading">
         <div>
           <p className="eyebrow">Scan results</p>
           <h3>Results for Run {runId}</h3>
         </div>
-        <span style={{ fontSize: "12px", color: "#8f98aa" }}>
+        <span className={styles.resultCount}>
           {sorted.length} result{sorted.length !== 1 ? "s" : ""}
         </span>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "10px",
-          padding: "14px 20px",
-          alignItems: "center",
-          borderBottom: "1px solid #242b39",
-        }}
-      >
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "12px",
-            color: "#8f98aa",
-          }}
-        >
+      <div className={styles.filterBar}>
+        <label className={styles.filterLabel}>
           Match mode
           <select
             value={matchMode}
             onChange={(e) => setMatchMode(e.target.value as "and" | "or" | "none")}
-            style={{
-              border: "1px solid #303848",
-              borderRadius: "8px",
-              outline: "none",
-              background: "#0d1118",
-              color: "#c9d4e7",
-              padding: "4px 8px",
-              fontSize: "12px",
-              minHeight: "28px",
-            }}
           >
             <option value="none">All</option>
             <option value="and">AND only</option>
@@ -153,20 +131,11 @@ export default function ScanResultsTable({ results, runId, isLoading }: ScanResu
           </select>
         </label>
 
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "12px",
-            color: "#8f98aa",
-          }}
-        >
+        <label className={styles.filterLabel}>
           <input
             type="checkbox"
             checked={includeStale}
             onChange={(e) => setIncludeStale(e.target.checked)}
-            style={{ accentColor: "#7185a8" }}
           />
           Include stale
         </label>
@@ -176,206 +145,90 @@ export default function ScanResultsTable({ results, runId, isLoading }: ScanResu
           placeholder="Filter by symbol"
           value={symbolFilter}
           onChange={(e) => setSymbolFilter(e.target.value)}
-          style={{
-            border: "1px solid #303848",
-            borderRadius: "8px",
-            outline: "none",
-            background: "#0d1118",
-            color: "#f5f7fb",
-            padding: "4px 8px",
-            fontSize: "12px",
-            minHeight: "28px",
-            width: "140px",
-            marginLeft: "auto",
-          }}
+          className={styles.symbolFilter}
         />
       </div>
 
       <div style={{ overflowX: "auto" }}>
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            border: "1px solid #242b39",
-            fontSize: "13px",
-          }}
-        >
+        <table className={styles.table}>
           <thead>
-            <tr style={{ background: "#171c26" }}>
+            <tr>
               <th
-                style={{
-                  width: "80px",
-                  padding: "8px 10px",
-                  textAlign: "left",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={styles.th}
+                style={{ width: "80px" }}
                 onClick={() => handleSort("symbol")}
               >
                 Symbol {sortIndicator("symbol")}
               </th>
               <th
-                style={{
-                  width: "110px",
-                  padding: "8px 10px",
-                  textAlign: "left",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={styles.th}
+                style={{ width: "110px" }}
                 onClick={() => handleSort("tradeDate")}
               >
                 Trade date {sortIndicator("tradeDate")}
               </th>
               <th
-                style={{
-                  width: "90px",
-                  padding: "8px 10px",
-                  textAlign: "right",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "90px" }}
                 onClick={() => handleSort("currentPrice")}
               >
                 Price {sortIndicator("currentPrice")}
               </th>
               <th
-                style={{
-                  width: "80px",
-                  padding: "8px 10px",
-                  textAlign: "right",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "80px" }}
                 onClick={() => handleSort("rsi")}
               >
                 RSI {sortIndicator("rsi")}
               </th>
               <th
-                style={{
-                  width: "80px",
-                  padding: "8px 10px",
-                  textAlign: "right",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "80px" }}
                 onClick={() => handleSort("mfi")}
               >
                 MFI {sortIndicator("mfi")}
               </th>
               <th
-                style={{
-                  width: "80px",
-                  padding: "8px 10px",
-                  textAlign: "right",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                }}
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "80px" }}
               >
                 BB lower
               </th>
               <th
-                style={{
-                  width: "80px",
-                  padding: "8px 10px",
-                  textAlign: "right",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "80px" }}
                 onClick={() => handleSort("bollingerMiddle")}
               >
                 BB middle {sortIndicator("bollingerMiddle")}
               </th>
               <th
-                style={{
-                  width: "80px",
-                  padding: "8px 10px",
-                  textAlign: "right",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                }}
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "80px" }}
               >
                 BB upper
               </th>
               <th
-                style={{
-                  width: "60px",
-                  padding: "8px 10px",
-                  textAlign: "center",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
+                className={`${styles.th} ${styles.thCenter}`}
+                style={{ width: "60px" }}
                 onClick={() => handleSort("matchedCount")}
               >
                 Matched {sortIndicator("matchedCount")}
               </th>
               <th
-                style={{
-                  width: "60px",
-                  padding: "8px 10px",
-                  textAlign: "center",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                }}
+                className={`${styles.th} ${styles.thCenter}`}
+                style={{ width: "60px" }}
               >
                 AND
               </th>
               <th
-                style={{
-                  width: "60px",
-                  padding: "8px 10px",
-                  textAlign: "center",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                }}
+                className={`${styles.th} ${styles.thCenter}`}
+                style={{ width: "60px" }}
               >
                 OR
               </th>
               <th
-                style={{
-                  width: "60px",
-                  padding: "8px 10px",
-                  textAlign: "center",
-                  fontSize: "12px",
-                  color: "#8f98aa",
-                  fontWeight: 500,
-                  borderBottom: "1px solid #242b39",
-                }}
+                className={`${styles.th} ${styles.thCenter}`}
+                style={{ width: "60px" }}
               >
                 Stale
               </th>
@@ -385,189 +238,52 @@ export default function ScanResultsTable({ results, runId, isLoading }: ScanResu
             {sorted.map((row) => (
               <tr
                 key={`${row.symbol}-${row.tradeDate}`}
-                style={{
-                  background: row.dataStale ? "#2a171b" : undefined,
-                  transition: "background 120ms ease",
-                }}
-                onMouseEnter={(e) => {
-                  if (!row.dataStale) {
-                    (e.currentTarget as HTMLTableRowElement).style.background = "#202838";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!row.dataStale) {
-                    (e.currentTarget as HTMLTableRowElement).style.background = "";
-                  }
-                }}
+                className={`${styles.row}${row.dataStale ? ` ${styles.rowStale}` : ""}`}
               >
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
-                  {row.symbol}
-                </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
-                  {row.tradeDate}
-                </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "right",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={styles.cell}>{row.symbol}</td>
+                <td className={styles.cell}>{row.tradeDate}</td>
+                <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.currentPrice)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "right",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.rsi)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "right",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.mfi)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "right",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.bollingerLower)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "right",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.bollingerMiddle)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "right",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.bollingerUpper)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    color: "#c9d4e7",
-                    textAlign: "center",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellCenter}`}>
                   {matchedCount(row)}
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    textAlign: "center",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellCenter}`}>
                   <span
-                    style={{
-                      display: "inline-block",
-                      minWidth: "20px",
-                      borderRadius: "999px",
-                      padding: "2px 6px",
-                      background: row.allConditionsMatched ? "#14261f" : "#0e1219",
-                      color: row.allConditionsMatched ? "#a7e5c8" : "#8f98aa",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                    }}
+                    className={`${styles.badge}${row.allConditionsMatched ? ` ${styles.badgeSuccess}` : ""}`}
                   >
                     {row.allConditionsMatched ? "Y" : "N"}
                   </span>
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    textAlign: "center",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellCenter}`}>
                   <span
-                    style={{
-                      display: "inline-block",
-                      minWidth: "20px",
-                      borderRadius: "999px",
-                      padding: "2px 6px",
-                      background: row.anyConditionMatched ? "#14261f" : "#0e1219",
-                      color: row.anyConditionMatched ? "#a7e5c8" : "#8f98aa",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                    }}
+                    className={`${styles.badge}${row.anyConditionMatched ? ` ${styles.badgeSuccess}` : ""}`}
                   >
                     {row.anyConditionMatched ? "Y" : "N"}
                   </span>
                 </td>
-                <td
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: "13px",
-                    textAlign: "center",
-                    borderBottom: "1px solid #242b39",
-                  }}
-                >
+                <td className={`${styles.cell} ${styles.cellCenter}`}>
                   {row.dataStale ? (
-                    <span
-                      style={{
-                        display: "inline-block",
-                        borderRadius: "999px",
-                        padding: "2px 6px",
-                        background: "#2a171b",
-                        color: "#ffb4be",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                      }}
-                    >
+                    <span className={`${styles.badge} ${styles.badgeDanger}`}>
                       Stale
                     </span>
                   ) : (
-                    <span style={{ color: "#8f98aa", fontSize: "12px" }}>\u2014</span>
+                    <span className={styles.badgeMuted}>—</span>
                   )}
                 </td>
               </tr>

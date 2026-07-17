@@ -1,0 +1,161 @@
+.scanResultsTable {
+  padding: 0 0 12px 0;
+  overflow: hidden;
+}
+
+.mutedCenter {
+  padding: 20px 0;
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.resultCount {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 20px;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.filterLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.filterLabel select {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  outline: none;
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  padding: 4px 8px;
+  font-size: 12px;
+  min-height: 28px;
+  transition: border-color 100ms ease;
+}
+
+.filterLabel select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.filterLabel input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.symbolFilter {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  outline: none;
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  padding: 4px 8px;
+  font-size: 12px;
+  min-height: 28px;
+  width: 140px;
+  margin-left: auto;
+  transition: border-color 100ms ease;
+}
+
+.symbolFilter:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  user-select: none;
+  background: var(--color-surface-raised);
+}
+
+.thRight {
+  text-align: right;
+}
+
+.thCenter {
+  text-align: center;
+}
+
+.row {
+  transition: background 120ms ease;
+}
+
+.row:hover {
+  background: var(--color-surface-hover);
+}
+
+.rowStale {
+  background: var(--color-danger-soft);
+}
+
+.rowStale:hover {
+  background: var(--color-danger-soft);
+}
+
+.cell {
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cellRight {
+  text-align: right;
+}
+
+.cellCenter {
+  text-align: center;
+}
+
+.cell :global(.monospace) {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.badge {
+  display: inline-block;
+  min-width: 20px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--color-surface-raised);
+  color: var(--color-text-tertiary);
+}
+
+.badgeSuccess {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.badgeDanger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.badgeMuted {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}

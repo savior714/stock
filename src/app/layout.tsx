@@ -4,7 +4,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Stock Scanner",
-  description: "Personal macOS daily stock scanner"
+};
+
+export const viewport = {
+  colorScheme: "light dark",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatAppError } from "@/lib/app-error";
 import { cancelScan, getScanErrors, getScanRun, startScan } from "./api";
 import type { ScanError, ScanRunDetail } from "./types";
+import styles from "./ScanLogsPanel.module.css";
 
 type ScanLogsPanelProps = {
   runId: string;
@@ -28,38 +29,9 @@ const COLUMN_WIDTHS = {
   retryable: "90px",
 };
 
-const CELL_STYLE = {
-  padding: "7px 10px",
-  fontSize: "13px",
-  color: "#c9d4e7",
-  borderBottom: "1px solid #303746",
-};
-
-const HEADER_STYLE = {
-  padding: "8px 10px",
-  fontSize: "12px",
-  color: "#8f98aa",
-  fontWeight: 500,
-  borderBottom: "1px solid #303746",
-};
-
-const BADGE_BASE = {
-  display: "inline-block",
-  borderRadius: "999px",
-  padding: "2px 8px",
-  fontSize: "12px",
-  fontWeight: 600,
-};
-
 function RetryBadge({ retryable }: { retryable: boolean }) {
   return (
-    <span
-      style={{
-        ...BADGE_BASE,
-        background: retryable ? "#14261f" : "#0e1219",
-        color: retryable ? "#a7e5c8" : "#8f98aa",
-      }}
-    >
+    <span className={`${styles.badge}${retryable ? ` ${styles.badgeSuccess}` : ""}`}>
       {retryable ? "Retryable" : "Permanent"}
     </span>
   );
@@ -128,56 +100,41 @@ export default function ScanLogsPanel({
 
   if (state.isLoading) {
     return (
-      <div className="panel" style={{ padding: "20px" }}>
+      <div className="panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Scan logs</p>
             <h3>Logs &amp; Errors</h3>
           </div>
         </div>
-        <p className="muted" style={{ padding: "20px 0", textAlign: "center" }}>
-          Loading logs\u2026
-        </p>
+        <p className={styles.mutedCenter}>Loading logs…</p>
       </div>
     );
   }
 
   if (state.globalError) {
     return (
-      <div className="panel" style={{ padding: "20px" }}>
+      <div className="panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Scan logs</p>
             <h3>Logs &amp; Errors</h3>
           </div>
         </div>
-        <p style={{ padding: "20px 0", color: "#ffb4be" }}>{state.globalError}</p>
+        <p className={styles.globalError}>{state.globalError}</p>
       </div>
     );
   }
 
   return (
-    <div className="panel scan-logs-panel" style={{ padding: "0 0 12px 0", overflow: "hidden" }}>
-      <div className="panel-heading" style={{ padding: "20px 20px 0 20px" }}>
+    <div className={`panel ${styles.scanLogsPanel}`}>
+      <div className="panel-heading">
         <div>
           <p className="eyebrow">Scan logs</p>
           <h3>
             Logs &amp; Errors
             {state.errors.length > 0 && (
-              <span
-                style={{
-                  marginLeft: "10px",
-                  display: "inline-block",
-                  borderRadius: "999px",
-                  background: "#2a171b",
-                  color: "#ffb4be",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  padding: "2px 10px",
-                  minWidth: "24px",
-                  textAlign: "center",
-                }}
-              >
+              <span className={`${styles.errorCountBadge}`}>
                 {state.errors.length}
               </span>
             )}
@@ -187,65 +144,40 @@ export default function ScanLogsPanel({
 
       {state.errors.length === 0 ? (
         <div className="empty-state" style={{ minHeight: "120px", padding: "20px" }}>
-          <p className="muted" style={{ textAlign: "center" }}>
-            No errors \u2014 all symbols processed successfully.
-          </p>
+          <p className={styles.mutedCenter}>No errors — all symbols processed successfully.</p>
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              border: "1px solid #303746",
-              fontSize: "13px",
-            }}
-          >
+          <table className={styles.table}>
             <thead>
-              <tr style={{ background: "#171c26" }}>
+              <tr>
                 <th
-                  style={{
-                    ...HEADER_STYLE,
-                    width: COLUMN_WIDTHS.symbol,
-                    textAlign: "left",
-                  }}
+                  className={styles.th}
+                  style={{ width: COLUMN_WIDTHS.symbol, textAlign: "left" }}
                 >
                   Symbol
                 </th>
                 <th
-                  style={{
-                    ...HEADER_STYLE,
-                    width: COLUMN_WIDTHS.code,
-                    textAlign: "left",
-                  }}
+                  className={styles.th}
+                  style={{ width: COLUMN_WIDTHS.code, textAlign: "left" }}
                 >
                   Code
                 </th>
                 <th
-                  style={{
-                    ...HEADER_STYLE,
-                    flex: 1,
-                    textAlign: "left",
-                    minWidth: "200px",
-                  }}
+                  className={styles.th}
+                  style={{ flex: 1, textAlign: "left", minWidth: "200px" }}
                 >
                   Message
                 </th>
                 <th
-                  style={{
-                    ...HEADER_STYLE,
-                    width: COLUMN_WIDTHS.attempt,
-                    textAlign: "center",
-                  }}
+                  className={`${styles.th} ${styles.thCenter}`}
+                  style={{ width: COLUMN_WIDTHS.attempt }}
                 >
                   Attempt
                 </th>
                 <th
-                  style={{
-                    ...HEADER_STYLE,
-                    width: COLUMN_WIDTHS.retryable,
-                    textAlign: "center",
-                  }}
+                  className={`${styles.th} ${styles.thCenter}`}
+                  style={{ width: COLUMN_WIDTHS.retryable }}
                 >
                   Retryable
                 </th>
@@ -253,70 +185,42 @@ export default function ScanLogsPanel({
             </thead>
             <tbody>
               {state.errors.map((error, index) => {
-                const rowBg = "#0d1118";
-                const hoverBg = "#171c26";
                 const leftBorder = error.retryable
-                  ? "3px solid #345d4d"
-                  : "3px solid #6a343c";
+                  ? styles.rowRetryable
+                  : styles.rowPermanent;
 
                 return (
                   <tr
                     key={`${error.symbol ?? "unknown"}-${error.code}-${index}`}
-                    style={{
-                      background: rowBg,
-                      borderLeft: leftBorder,
-                      transition: "background 120ms ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = hoverBg;
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLTableRowElement).style.background = rowBg;
-                    }}
+                    className={`${styles.row} ${leftBorder}`}
                   >
                     <td
-                      style={{
-                        ...CELL_STYLE,
-                        width: COLUMN_WIDTHS.symbol,
-                        fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                      }}
+                      className={`${styles.cell} ${styles.cellMonospace}`}
+                      style={{ width: COLUMN_WIDTHS.symbol }}
                     >
                       {error.symbol ?? "unknown"}
                     </td>
                     <td
-                      style={{
-                        ...CELL_STYLE,
-                        width: COLUMN_WIDTHS.code,
-                        fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                        color: "#8f98aa",
-                      }}
+                      className={`${styles.cell} ${styles.cellMonospace} ${styles.cellMuted}`}
+                      style={{ width: COLUMN_WIDTHS.code }}
                     >
                       {error.code}
                     </td>
                     <td
-                      style={{
-                        ...CELL_STYLE,
-                        flex: 1,
-                        minWidth: "200px",
-                      }}
+                      className={`${styles.cell}`}
+                      style={{ flex: 1, minWidth: "200px" }}
                     >
                       {error.message}
                     </td>
                     <td
-                      style={{
-                        ...CELL_STYLE,
-                        width: COLUMN_WIDTHS.attempt,
-                        textAlign: "center",
-                      }}
+                      className={`${styles.cell} ${styles.cellCenter}`}
+                      style={{ width: COLUMN_WIDTHS.attempt }}
                     >
                       {error.attempt}
                     </td>
                     <td
-                      style={{
-                        ...CELL_STYLE,
-                        width: COLUMN_WIDTHS.retryable,
-                        textAlign: "center",
-                      }}
+                      className={`${styles.cell} ${styles.cellCenter}`}
+                      style={{ width: COLUMN_WIDTHS.retryable }}
                     >
                       <RetryBadge retryable={error.retryable} />
                     </td>
@@ -329,36 +233,14 @@ export default function ScanLogsPanel({
       )}
 
       {isRetryable && retryableErrors.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "14px 20px",
-            borderTop: "1px solid #242b39",
-          }}
-        >
-          <span style={{ fontSize: "13px", color: "#8f98aa" }}>
+        <div className={styles.retryBar}>
+          <span className={styles.retryText}>
             {retryableErrors.length} error{retryableErrors.length !== 1 ? "s" : ""} can be retried
           </span>
           <button
             onClick={handleRetry}
             disabled={state.retryingSymbol !== null}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 16px",
-              borderRadius: "8px",
-              border: "1px solid #345d4d",
-              background: state.retryingSymbol !== null ? "#14261f" : "#1a3329",
-              color: state.retryingSymbol !== null ? "#8f98aa" : "#a7e5c8",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: state.retryingSymbol !== null ? "not-allowed" : "pointer",
-              outline: "none",
-              transition: "background 120ms ease",
-            }}
+            className={`${styles.retryButton}${state.retryingSymbol !== null ? ` ${styles.retryButtonDisabled}` : ""}`}
           >
             {state.retryingSymbol !== null ? "Retrying..." : "Retry failed symbols"}
           </button>

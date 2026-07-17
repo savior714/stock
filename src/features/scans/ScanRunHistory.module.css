@@ -1,0 +1,188 @@
+.loading {
+  padding: 20px;
+}
+
+.mutedCenter {
+  text-align: center;
+  padding: 20px 0;
+  color: var(--color-text-tertiary);
+}
+
+.errorText {
+  padding: 20px 0;
+  color: var(--color-danger);
+}
+
+.historyContainer {
+  padding: 0 0 12px 0;
+  overflow: hidden;
+}
+
+.historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.refreshButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-raised);
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: background 120ms ease;
+}
+
+.refreshButton:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
+}
+
+.historyList {
+  padding: 12px 14px;
+}
+
+.historyItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.historyItem:hover {
+  background: var(--color-surface-hover);
+}
+
+.historyItemSelected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.statusBadge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 72px;
+  text-align: center;
+}
+
+.statusPending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.statusRunning {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.statusCompleted {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.statusCancelled {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.statusFailed {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.historyItemInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.historyItemId {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyItemMeta {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyItemStats {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.failedCount {
+  color: var(--color-danger);
+}
+
+.historyItemTime {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  min-width: 70px;
+  text-align: right;
+}
+
+.historyDetail {
+  padding: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  font-size: 13px;
+}
+
+.detailFull {
+  grid-column: 1 / -1;
+}
+
+.detailLabel {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  display: block;
+}
+
+.detailValue {
+  color: var(--color-text-primary);
+  margin-top: 2px;
+}
+
+.detailMonospace {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

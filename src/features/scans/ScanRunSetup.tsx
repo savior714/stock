@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatAppError } from "@/lib/app-error";
+import styles from "./ScanRunSetup.module.css";
 import { cancelScan, getScanErrors, getScanRun, listScanRuns, startScan } from "./api";
 import { subscribeScanEvent, unsubscribeAll } from "./events";
 import type {
@@ -16,16 +17,9 @@ import type { WatchlistSummary } from "@/features/watchlists/types";
 import { listScanPresets } from "@/features/scan-presets/api";
 import type { ScanPresetSummary } from "@/features/scan-presets/types";
 
-type SelectOption = {
-  id: string;
-  name: string;
-};
-
 type SetupState = {
-  watchlists: SelectOption[];
-  presets: SelectOption[];
-  selectedWatchlistId: string;
-  selectedPresetId: string;
+  watchlists: Array<{ id: string; name: string }>;
+  presets: Array<{ id: string; name: string }>;
   isRunning: boolean;
   currentRunId: string | null;
   runDetail: ScanRunDetail | null;
@@ -39,8 +33,6 @@ type SetupState = {
 const emptyState: SetupState = {
   watchlists: [],
   presets: [],
-  selectedWatchlistId: "",
-  selectedPresetId: "",
   isRunning: false,
   currentRunId: null,
   runDetail: null,
@@ -59,26 +51,38 @@ const FINISHED_STATUSES: Set<ScanRunDetail["status"]> = new Set([
 
 function progressPercent(detail: ScanRunDetail): number {
   if (detail.totalSymbols === 0) return 0;
-  return Math.round((detail.succeededSymbols + detail.failedSymbols) / detail.totalSymbols * 100);
+  return Math.round(
+    (detail.succeededSymbols + detail.failedSymbols) / detail.totalSymbols * 100,
+  );
 }
 
-export default function ScanRunSetup() {
+type ScanRunSetupProps = {
+  selectedWatchlistId: string;
+  onWatchlistIdChange: (id: string) => void;
+  selectedPresetId: string;
+  onPresetIdChange: (id: string) => void;
+  watchlists: WatchlistSummary[];
+  onDrawerOpen: () => void;
+};
+
+export default function ScanRunSetup({
+  selectedWatchlistId: externalWatchlistId,
+  onWatchlistIdChange,
+  selectedPresetId: externalPresetId,
+  onPresetIdChange,
+  watchlists,
+  onDrawerOpen,
+}: ScanRunSetupProps) {
   const [state, setState] = useState<SetupState>(emptyState);
   const [presetConditionCount, setPresetConditionCount] = useState<number | null>(null);
   const [isLoadingPresets, setIsLoadingPresets] = useState(true);
+  const [allPresets, setAllPresets] = useState<ScanPresetSummary[]>([]);
   const pollTimerRef = useRef<number | null>(null);
 
   const loadInitialData = useCallback(async () => {
     try {
-      const [watchlists, presets] = await Promise.all([
-        listWatchlists(),
-        listScanPresets(),
-      ]);
-      setState((s) => ({
-        ...s,
-        watchlists: watchlists.map((w) => ({ id: w.id, name: w.name })),
-        presets: presets.map((p) => ({ id: p.id, name: p.name })),
-      }));
+      const presets = await listScanPresets();
+      setAllPresets(presets);
     } catch (error) {
       setState((s) => ({ ...s, globalError: formatAppError(error) }));
     } finally {
@@ -100,21 +104,13 @@ export default function ScanRunSetup() {
   }, [loadInitialData]);
 
   useEffect(() => {
-    if (state.selectedPresetId) {
-      listScanPresets()
-        .then((presets) => {
-          const found = presets.find((p) => p.id === state.selectedPresetId);
-          if (found) {
-            setPresetConditionCount(found.enabledConditionCount);
-          } else {
-            setPresetConditionCount(null);
-          }
-        })
-        .catch(() => setPresetConditionCount(null));
+    if (externalPresetId) {
+      const found = allPresets.find((p) => p.id === externalPresetId);
+      setPresetConditionCount(found?.enabledConditionCount ?? null);
     } else {
       setPresetConditionCount(null);
     }
-  }, [state.selectedPresetId]);
+  }, [externalPresetId, allPresets]);
 
   const startPolling = useCallback((runId: string) => {
     if (pollTimerRef.current) {
@@ -199,46 +195,41 @@ export default function ScanRunSetup() {
     };
   }, []);
 
-  const handleWatchlistChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setState((s) => ({
-      ...s,
-      selectedWatchlistId: e.target.value,
-      globalError: "",
-    }));
-  }, []);
+  const handlePresetChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      onPresetIdChange(e.target.value);
+      setState((s) => ({ ...s, globalError: "" }));
+    },
+    [onPresetIdChange],
+  );
 
-  const handlePresetChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setState((s) => ({
-      ...s,
-      selectedPresetId: e.target.value,
-      globalError: "",
-    }));
-  }, []);
+  const handleStart = useCallback(
+    async (watchlistId: string, presetId: string) => {
+      if (!watchlistId || !presetId) return;
 
-  const handleStart = useCallback(async () => {
-    if (!state.selectedWatchlistId || !state.selectedPresetId) return;
+      setState((s) => ({ ...s, globalError: "", isLoading: true }));
 
-    setState((s) => ({ ...s, globalError: "", isLoading: true }));
-
-    try {
-      const runId = await startScan({
-        watchlistId: state.selectedWatchlistId,
-        presetId: state.selectedPresetId,
-      });
-      setState((s) => ({
-        ...s,
-        currentRunId: runId,
-        isRunning: true,
-        runDetail: null,
-        errors: [],
-      }));
-      startPolling(runId);
-    } catch (error) {
-      setState((s) => ({ ...s, globalError: formatAppError(error) }));
-    } finally {
-      setState((s) => ({ ...s, isLoading: false }));
-    }
-  }, [state.selectedWatchlistId, state.selectedPresetId, startPolling]);
+      try {
+        const runId = await startScan({
+          watchlistId,
+          presetId,
+        });
+        setState((s) => ({
+          ...s,
+          currentRunId: runId,
+          isRunning: true,
+          runDetail: null,
+          errors: [],
+        }));
+        startPolling(runId);
+      } catch (error) {
+        setState((s) => ({ ...s, globalError: formatAppError(error) }));
+      } finally {
+        setState((s) => ({ ...s, isLoading: false }));
+      }
+    },
+    [startPolling],
+  );
 
   const handleCancel = useCallback(async () => {
     if (!state.currentRunId || state.isCancelling) return;
@@ -248,7 +239,11 @@ export default function ScanRunSetup() {
     try {
       await cancelScan(state.currentRunId);
     } catch (error) {
-      setState((s) => ({ ...s, isCancelling: false, globalError: formatAppError(error) }));
+      setState((s) => ({
+        ...s,
+        isCancelling: false,
+        globalError: formatAppError(error),
+      }));
     }
   }, [state.currentRunId, state.isCancelling]);
 
@@ -261,232 +256,183 @@ export default function ScanRunSetup() {
     setPresetConditionCount(null);
   }, []);
 
-  const selectedWatchlist = state.watchlists.find(
-    (w) => w.id === state.selectedWatchlistId,
-  );
-  const selectedPreset = state.presets.find(
-    (p) => p.id === state.selectedPresetId,
-  );
-
-  const watchlistSymbolCount = state.watchlists.find(
-    (w) => w.id === state.selectedWatchlistId,
-  ) as WatchlistSummary | undefined;
-
   const canStart =
-    state.selectedWatchlistId &&
-    state.selectedPresetId &&
+    externalWatchlistId &&
+    externalPresetId &&
     !state.isRunning &&
     !state.isLoading;
 
+  const selectedPreset = allPresets.find((p) => p.id === externalPresetId);
+  const selectedWatchlist = watchlists.find(
+    (w) => w.id === externalWatchlistId,
+  );
+
+  const watchlistSymbolCount = watchlists.find(
+    (w) => w.id === externalWatchlistId,
+  ) as WatchlistSummary | undefined;
+
+  if (isLoadingPresets) {
+    return <div className={styles.setupLoading}>목록을 불러오는 중입니다.</div>;
+  }
+
   return (
-    <div className="panel scan-run-setup" style={{ padding: "20px" }}>
-      <div className="panel-heading">
+    <div className={styles.setupArea}>
+      <div className={styles.setupContext}>
         <div>
-          <p className="eyebrow">Run configuration</p>
-          <h3>Scan Run Setup</h3>
+          <p className={styles.setupContextName}>{selectedWatchlist?.name}</p>
+          <p className={styles.setupContextMeta}>
+            {watchlistSymbolCount
+              ? `${watchlistSymbolCount.symbolCount} symbols`
+              : "— symbols"}
+          </p>
         </div>
-        {(state.currentRunId || state.runDetail) && (
-          <button className="secondary-button" type="button" onClick={handleReset}>
-            초기화
+        <div className={styles.setupContextActions}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={onDrawerOpen}
+          >
+            Preset 편집
           </button>
-        )}
+        </div>
       </div>
 
-      {isLoadingPresets ? (
-        <p className="muted">목록을 불러오는 중입니다.</p>
-      ) : (
-        <>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "16px",
-              marginBottom: "16px",
-            }}
-          >
-            <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#c9d0dd" }}>
-              Watchlist
-              <select
-                value={state.selectedWatchlistId}
-                onChange={handleWatchlistChange}
-                disabled={state.isRunning}
-                style={{
-                  width: "100%",
-                  border: "1px solid #303848",
-                  borderRadius: "10px",
-                  outline: "none",
-                  background: "#0d1118",
-                  color: "#f5f7fb",
-                  minHeight: "42px",
-                  padding: "9px 11px",
-                  fontSize: "13px",
-                }}
-              >
-                <option value="">-- 선택 --</option>
-                {state.watchlists.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#c9d0dd" }}>
-              Scan Preset
-              <select
-                value={state.selectedPresetId}
-                onChange={handlePresetChange}
-                disabled={state.isRunning}
-                style={{
-                  width: "100%",
-                  border: "1px solid #303848",
-                  borderRadius: "10px",
-                  outline: "none",
-                  background: "#0d1118",
-                  color: "#f5f7fb",
-                  minHeight: "42px",
-                  padding: "9px 11px",
-                  fontSize: "13px",
-                }}
-              >
-                <option value="">-- 선택 --</option>
-                {state.presets.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+      <div className={styles.setupControls}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "12px",
+          }}
+        >
+          <div className={styles.setupSelectGroup}>
+            <label>Scan Preset</label>
+            <select
+              value={externalPresetId}
+              onChange={handlePresetChange}
+              disabled={state.isRunning}
+            >
+              <option value="">-- 선택 --</option>
+              {allPresets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
+        </div>
 
-          {!state.selectedWatchlistId && !state.selectedPresetId ? (
-            <div className="compact-empty" style={{ minHeight: "60px", padding: "12px", marginBottom: "16px" }}>
-              <span>Watchlist과 Preset을 모두 선택하십시오.</span>
-            </div>
-          ) : null}
+        {externalWatchlistId && externalPresetId && (
+          <div className={styles.setupInfo}>
+            <span>
+              {presetConditionCount !== null
+                ? `${presetConditionCount} conditions`
+                : "— conditions"}
+            </span>
+            <span>
+              {watchlistSymbolCount
+                ? `${watchlistSymbolCount.symbolCount} symbols`
+                : "— symbols"}
+            </span>
+          </div>
+        )}
 
-          {(state.selectedWatchlistId || state.selectedPresetId) && (
-            <div className="form-meta" style={{ marginBottom: "16px" }}>
-              <span>
-                {presetConditionCount !== null ? `${presetConditionCount} conditions` : "— conditions"}
-              </span>
-              <span>
-                {watchlistSymbolCount
-                  ? `${watchlistSymbolCount.symbolCount} symbols`
-                  : "— symbols"}
-              </span>
-            </div>
-          )}
+        {!externalWatchlistId && !externalPresetId ? (
+          <div className={styles.setupEmptySelect}>
+            Watchlist과 Preset을 모두 선택하십시오.
+          </div>
+        ) : null}
 
-          <div className="form-actions" style={{ marginBottom: "16px" }}>
+        {(externalWatchlistId || externalPresetId) && (
+          <div className={styles.setupActions}>
             {state.isRunning ? (
-              <button
-                className="scan-button"
-                type="button"
-                onClick={handleCancel}
-              >
-                Cancel
-              </button>
+              <>
+                <button
+                  className="scan-button"
+                  type="button"
+                  onClick={handleCancel}
+                >
+                  {state.isCancelling ? "취소 중…" : "실행 취소"}
+                </button>
+              </>
             ) : (
               <button
                 className="primary-button strong"
                 type="button"
-                onClick={handleStart}
+                onClick={() => handleStart(externalWatchlistId, externalPresetId)}
                 disabled={!canStart}
               >
-                {state.isLoading ? "Starting…" : "Start Scan"}
+                {state.isLoading ? "Scan 시작 중…" : "Scan 실행"}
               </button>
             )}
           </div>
+        )}
 
-          {state.globalError ? (
-            <div className="message error-message" style={{ marginBottom: "16px" }}>
-              {state.globalError}
+        {state.globalError ? (
+          <div className="message error-message">{state.globalError}</div>
+        ) : null}
+
+        {state.runDetail && (
+          <div className={styles.setupProgress}>
+            <div className={styles.setupProgressHeader}>
+              <span className={styles.setupProgressStatus}>
+                {state.runDetail.status === "completed"
+                  ? "스캔 완료"
+                  : state.runDetail.status === "cancelled"
+                    ? "스캔 취소됨"
+                    : state.runDetail.status === "failed"
+                      ? "스캔 실패"
+                      : "처리 중…"}
+              </span>
+              <span className={styles.setupProgressBadge}>{state.runDetail.status}</span>
             </div>
-          ) : null}
-
-          {state.runDetail && (
-            <div style={{ marginBottom: "16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                <span style={{ fontSize: "13px", color: "#8f98aa" }}>
-                  Run: {state.runDetail.id}
-                </span>
-                <span
-                  style={{
-                    fontSize: "12px",
-                    padding: "3px 8px",
-                    borderRadius: "999px",
-                    background: "#0e1219",
-                    color: "#c9d4e7",
-                  }}
-                >
-                  {state.runDetail.status}
-                </span>
+            {state.currentSymbol && (
+              <div className={styles.setupProgressCurrent}>
+                Processing: <strong>{state.currentSymbol}</strong>
               </div>
-              {state.currentSymbol && (
-                <div style={{ fontSize: "12px", color: "#8f98aa", marginBottom: "6px" }}>
-                  Processing: <strong style={{ color: "#c9d4e7" }}>{state.currentSymbol}</strong>
-                </div>
-              )}
-              <div style={{
-                height: "6px",
-                borderRadius: "3px",
-                background: "#171c26",
-                overflow: "hidden",
-              }}>
-                <div style={{
-                  height: "100%",
-                  width: `${progressPercent(state.runDetail)}%`,
-                  background: "#7185a8",
-                  borderRadius: "3px",
-                  transition: "width 200ms ease",
-                }} />
-              </div>
-              <div className="form-meta" style={{ marginTop: "8px" }}>
-                <span>
-                  {state.runDetail.succeededSymbols} succeeded
-                </span>
-                <span>
-                  {state.runDetail.failedSymbols} failed
-                </span>
-                <span>
-                  {progressPercent(state.runDetail)}%
-                </span>
-              </div>
+            )}
+            <div className={styles.setupProgressBarTrack}>
+              <div
+                className={styles.setupProgressBarFill}
+                style={{ width: `${progressPercent(state.runDetail)}%` }}
+              />
             </div>
-          )}
+            <div className={styles.setupProgressMeta}>
+              <span>{state.runDetail.succeededSymbols} succeeded</span>
+              <span>{state.runDetail.failedSymbols} failed</span>
+              <span>{progressPercent(state.runDetail)}%</span>
+            </div>
+          </div>
+        )}
 
-          {state.errors.length > 0 && (
-            <div>
-              <h4 style={{ margin: "0 0 8px", fontSize: "14px", color: "#ffb4be" }}>
-                Errors ({state.errors.length})
-              </h4>
-              <div style={{ display: "grid", gap: "6px" }}>
-                {state.errors.map((err, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      fontSize: "12px",
-                      padding: "8px 10px",
-                      border: "1px solid #303746",
-                      borderRadius: "8px",
-                      background: "#0d1118",
-                      color: "#c9d0dd",
-                    }}
-                  >
-                    <div>
-                      <strong>{err.symbol || "unknown"}</strong> — {err.code}
-                    </div>
-                    <div style={{ color: "#8f98aa", marginTop: "2px" }}>
-                      {err.message}
-                    </div>
+        {state.runDetail && FINISHED_STATUSES.has(state.runDetail.status) && state.runDetail.status === "completed" && (
+          <div className={styles.setupCompletion}>
+            <h4>스캔 완료</h4>
+            <p>
+              {state.runDetail.totalSymbols}개 중{" "}
+              {state.runDetail.succeededSymbols}개 종목 처리 완료
+            </p>
+          </div>
+        )}
+
+        {state.errors.length > 0 && (
+          <div className={styles.setupErrors}>
+            <h4>Errors ({state.errors.length})</h4>
+            <div className={styles.setupErrorList}>
+              {state.errors.map((err, idx) => (
+                <div key={idx} className={styles.setupErrorItem}>
+                  <div>
+                    <strong>{err.symbol || "unknown"}</strong> — {err.code}
                   </div>
-                ))}
-              </div>
+                  <div className={styles.setupErrorItemDetail}>
+                    {err.message}
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-        </>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
