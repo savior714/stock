@@ -13,6 +13,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.88.0
         with:
@@ -22,6 +28,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Rust clippy
         id: clippy
@@ -34,7 +46,7 @@ jobs:
         if: steps.clippy.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: final-clippy-log
+          name: built-clippy-log
           path: clippy.log
 
       - name: Fail on clippy error
