@@ -2,20 +2,18 @@
 
 import { useCallback, useState } from "react";
 
-import ScanPresetWorkspace from "@/features/scan-presets/ScanPresetWorkspace";
-import WatchlistWorkspace from "@/features/watchlists/WatchlistWorkspace";
-import ScanRunSetup from "@/features/scans/ScanRunSetup";
+import ScannerWorkspace from "@/features/scanner/ScannerWorkspace";
 import ScanResultsTable from "@/features/scans/ScanResultsTable";
 import ScanLogsPanel from "@/features/scans/ScanLogsPanel";
 import ScanRunHistory from "@/features/scans/ScanRunHistory";
 import type { ScanRunDetail, ScanResult, ScanError } from "@/features/scans/types";
 import { getScanResults, getScanErrors } from "@/features/scans/api";
 
-const sections = ["Watchlists", "Scan Settings", "Scan", "Results", "Logs"] as const;
+const sections = ["Scanner", "Results", "Logs"] as const;
 type Section = (typeof sections)[number];
 
 export default function Home() {
-  const [active, setActive] = useState<Section>("Watchlists");
+  const [active, setActive] = useState<Section>("Scanner");
   const [selectedRun, setSelectedRun] = useState<ScanRunDetail | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
   const [errors, setErrors] = useState<ScanError[]>([]);
@@ -43,7 +41,7 @@ export default function Home() {
     setSelectedRun(null);
     setResults([]);
     setErrors([]);
-    setActive("Scan");
+    setActive("Scanner");
   }, []);
 
   return (
@@ -72,7 +70,7 @@ export default function Home() {
             <p className="eyebrow">Personal stock scanner</p>
             <h2>{active}</h2>
           </div>
-          {active === "Scan" && selectedRun && (
+          {active === "Scanner" && selectedRun && (
             <button
               className="secondary-button"
               type="button"
@@ -87,11 +85,7 @@ export default function Home() {
           )}
         </header>
 
-        {active === "Watchlists" ? (
-          <WatchlistWorkspace />
-        ) : active === "Scan Settings" ? (
-          <ScanPresetWorkspace />
-        ) : active === "Scan" ? (
+        {active === "Scanner" ? (
           selectedRun ? (
             <div style={{ display: "grid", gap: "16px" }}>
               <div className="panel" style={{ padding: "16px" }}>
@@ -123,7 +117,7 @@ export default function Home() {
               />
             </div>
           ) : (
-            <ScanRunSetup />
+            <ScannerWorkspace />
           )
         ) : active === "Results" ? (
           selectedRun ? (
