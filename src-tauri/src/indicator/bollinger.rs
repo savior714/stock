@@ -121,10 +121,8 @@ mod tests {
     #[test]
     fn multiplier_changes_band_width() {
         let closes = vec![10.0, 20.0, 30.0, 40.0, 50.0];
-        let (lower_one, middle_one, upper_one) =
-            calculate_bollinger(&closes, 5, 1.0).unwrap();
-        let (lower_two, middle_two, upper_two) =
-            calculate_bollinger(&closes, 5, 2.0).unwrap();
+        let (lower_one, middle_one, upper_one) = calculate_bollinger(&closes, 5, 1.0).unwrap();
+        let (lower_two, middle_two, upper_two) = calculate_bollinger(&closes, 5, 2.0).unwrap();
 
         assert_eq!(middle_one[4], middle_two[4]);
         let width_one = upper_one[4].unwrap() - lower_one[4].unwrap();

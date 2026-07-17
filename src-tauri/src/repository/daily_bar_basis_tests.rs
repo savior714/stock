@@ -37,17 +37,17 @@ fn bar(symbol: &str, trade_date: &str, price_basis: PriceBasis, close: f64) -> D
 #[test]
 fn rejects_basis_different_from_stored_rows_without_mutation() {
     let mut database = Database::open_in_memory().expect("database must initialize");
-    insert_instrument(&mut database, "AAPL");
+    insert_instrument(&mut database, "BASIS001");
 
     {
         let mut repository = DailyBarRepository::new(&mut database);
         repository
-            .upsert_batch(&[bar("AAPL", "2026-07-15", PriceBasis::Raw, 100.0)])
+            .upsert_batch(&[bar("BASIS001", "2026-07-15", PriceBasis::Raw, 100.0)])
             .expect("initial raw bar must insert");
 
         let error = repository
             .upsert_batch(&[bar(
-                "AAPL",
+                "BASIS001",
                 "2026-07-15",
                 PriceBasis::SplitAdjusted,
                 50.0,
@@ -60,7 +60,7 @@ fn rejects_basis_different_from_stored_rows_without_mutation() {
         .connection()
         .query_row(
             "SELECT price_basis, close FROM daily_bars
-             WHERE symbol = 'AAPL' AND trade_date = '2026-07-15'",
+             WHERE symbol = 'BASIS001' AND trade_date = '2026-07-15'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -73,21 +73,21 @@ fn rejects_basis_different_from_stored_rows_without_mutation() {
 #[test]
 fn rejects_preexisting_mixed_basis_series() {
     let mut database = Database::open_in_memory().expect("database must initialize");
-    insert_instrument(&mut database, "AAPL");
+    insert_instrument(&mut database, "BASIS002");
     database
         .connection_mut()
         .execute_batch(
             "INSERT INTO daily_bars (
                  symbol, trade_date, price_basis, open, high, low, close, volume
              ) VALUES
-                 ('AAPL', '2026-07-14', 'raw', 100, 101, 99, 100, 1000),
-                 ('AAPL', '2026-07-15', 'split_adjusted', 50, 51, 49, 50, 2000);",
+                 ('BASIS002', '2026-07-14', 'raw', 100, 101, 99, 100, 1000),
+                 ('BASIS002', '2026-07-15', 'split_adjusted', 50, 51, 49, 50, 2000);",
         )
         .expect("mixed fixture must insert");
 
     let mut repository = DailyBarRepository::new(&mut database);
     let error = repository
-        .upsert_batch(&[bar("AAPL", "2026-07-16", PriceBasis::Raw, 102.0)])
+        .upsert_batch(&[bar("BASIS002", "2026-07-16", PriceBasis::Raw, 102.0)])
         .expect_err("mixed stored basis must fail");
 
     assert_eq!(error.code, AppErrorCode::Database);
@@ -96,18 +96,18 @@ fn rejects_preexisting_mixed_basis_series() {
 #[test]
 fn rejects_invalid_calendar_dates() {
     let mut database = Database::open_in_memory().expect("database must initialize");
-    insert_instrument(&mut database, "AAPL");
+    insert_instrument(&mut database, "BASIS003");
     let mut repository = DailyBarRepository::new(&mut database);
 
     for invalid_date in ["2026-02-29", "2026-04-31", "2026-13-01", "abcd-ef-gh"] {
         let error = repository
-            .upsert_batch(&[bar("AAPL", invalid_date, PriceBasis::Raw, 100.0)])
+            .upsert_batch(&[bar("BASIS003", invalid_date, PriceBasis::Raw, 100.0)])
             .expect_err("invalid date must fail");
         assert_eq!(error.code, AppErrorCode::Validation);
     }
 
     repository
-        .upsert_batch(&[bar("AAPL", "2024-02-29", PriceBasis::Raw, 100.0)])
+        .upsert_batch(&[bar("BASIS003", "2024-02-29", PriceBasis::Raw, 100.0)])
         .expect("leap day must be accepted");
 }
 
@@ -115,8 +115,12 @@ fn rejects_invalid_calendar_dates() {
 fn rejects_invalid_or_reversed_load_range() {
     let mut database = Database::open_in_memory().expect("database must initialize");
     let repository = DailyBarRepository::new(&mut database);
-    let symbol = Symbol::new("AAPL").expect("symbol must be valid");
+    let symbol = Symbol::new("BASIS004").expect("symbol must be valid");
 
-    assert!(repository.load_range(&symbol, "2026-02-29", "2026-03-01").is_err());
-    assert!(repository.load_range(&symbol, "2026-07-16", "2026-07-15").is_err());
+    assert!(repository
+        .load_range(&symbol, "2026-02-29", "2026-03-01")
+        .is_err());
+    assert!(repository
+        .load_range(&symbol, "2026-07-16", "2026-07-15")
+        .is_err());
 }

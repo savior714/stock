@@ -120,7 +120,11 @@ impl<'connection> ScanErrorRepository<'connection> {
 }
 
 fn bool_to_int(value: bool) -> i32 {
-    if value { 1 } else { 0 }
+    if value {
+        1
+    } else {
+        0
+    }
 }
 
 fn db_error(message: &'static str, error: rusqlite::Error) -> AppError {

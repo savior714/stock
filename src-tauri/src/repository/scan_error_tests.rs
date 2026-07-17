@@ -126,10 +126,14 @@ fn retryable_run_level_error_is_not_a_symbol_target() {
         .expect("symbol error must append");
 
     assert_eq!(
-        repo.get_retryable_symbols(&run_id).expect("query must succeed"),
+        repo.get_retryable_symbols(&run_id)
+            .expect("query must succeed"),
         vec!["AAPL"]
     );
-    assert_eq!(repo.count_retryable(&run_id).expect("count must succeed"), 1);
+    assert_eq!(
+        repo.count_retryable(&run_id).expect("count must succeed"),
+        1
+    );
 }
 
 #[test]

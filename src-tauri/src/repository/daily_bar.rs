@@ -56,7 +56,9 @@ impl<'connection> DailyBarRepository<'connection> {
                     params![symbol],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
-                .map_err(|error| db_error("failed to inspect stored DailyBar price basis", error))?;
+                .map_err(|error| {
+                    db_error("failed to inspect stored DailyBar price basis", error)
+                })?;
 
             if basis_count > 1 {
                 return Err(AppError::database(
@@ -233,7 +235,9 @@ fn validate_trade_date(value: &str) -> AppResult<()> {
         .map_err(|_| AppError::validation("trade_date day must be numeric"))?;
 
     if year == 0 || !(1..=12).contains(&month) {
-        return Err(AppError::validation("trade_date is not a valid calendar date"));
+        return Err(AppError::validation(
+            "trade_date is not a valid calendar date",
+        ));
     }
 
     let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
@@ -245,7 +249,9 @@ fn validate_trade_date(value: &str) -> AppResult<()> {
     };
 
     if day == 0 || day > max_day {
-        return Err(AppError::validation("trade_date is not a valid calendar date"));
+        return Err(AppError::validation(
+            "trade_date is not a valid calendar date",
+        ));
     }
 
     Ok(())
