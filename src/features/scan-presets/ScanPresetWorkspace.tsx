@@ -34,6 +34,7 @@ export default function ScanPresetWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<ScanPresetFormState>(emptyPresetForm());
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
   const operationRef = useRef(false);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
@@ -41,6 +42,8 @@ export default function ScanPresetWorkspace() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const isBusy = isLoadingDetail || isSaving || isDeleting;
+  const isConfirmingDelete = Boolean(form.id && deleteConfirmationId === form.id);
+  const isInteractionLocked = isBusy || isConfirmingDelete;
 
   useEffect(() => {
     return () => {
@@ -111,6 +114,7 @@ export default function ScanPresetWorkspace() {
     }
 
     operationRef.current = true;
+    setDeleteConfirmationId(null);
     setError(null);
     setNotice(null);
     setFieldErrors({});
@@ -132,6 +136,7 @@ export default function ScanPresetWorkspace() {
       return;
     }
 
+    setDeleteConfirmationId(null);
     setForm(emptyPresetForm());
     setError(null);
     setNotice(null);
@@ -153,7 +158,7 @@ export default function ScanPresetWorkspace() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (operationRef.current) {
+    if (operationRef.current || deleteConfirmationId) {
       return;
     }
 
@@ -197,22 +202,39 @@ export default function ScanPresetWorkspace() {
       operationRef.current = false;
       setIsSaving(false);
     }
-  }, [form, clearNotice, refreshList, showNotice]);
+  }, [form, deleteConfirmationId, clearNotice, refreshList, showNotice]);
 
-  const handleDelete = useCallback(async () => {
+  const requestDelete = useCallback(() => {
     if (!form.id || operationRef.current) {
       return;
     }
 
-    if (!window.confirm(`"${form.name}" Preset을 삭제하시겠습니까?`)) {
+    clearNotice();
+    setError(null);
+    setFieldErrors({});
+    setDeleteConfirmationId(form.id);
+  }, [form.id, clearNotice]);
+
+  const cancelDelete = useCallback(() => {
+    if (!operationRef.current) {
+      setDeleteConfirmationId(null);
+    }
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    const presetId = form.id;
+    if (!presetId || deleteConfirmationId !== presetId || operationRef.current) {
       return;
     }
 
     operationRef.current = true;
     setIsDeleting(true);
+    setError(null);
+    clearNotice();
 
     try {
-      await deleteScanPreset(form.id);
+      await deleteScanPreset(presetId);
+      setDeleteConfirmationId(null);
       setForm(emptyPresetForm());
       await refreshList();
       showNotice("Preset이 삭제되었습니다.");
@@ -222,7 +244,7 @@ export default function ScanPresetWorkspace() {
       operationRef.current = false;
       setIsDeleting(false);
     }
-  }, [form, refreshList, showNotice]);
+  }, [form.id, deleteConfirmationId, clearNotice, refreshList, showNotice]);
 
   return (
     <div className="scan-preset-layout">
@@ -236,7 +258,7 @@ export default function ScanPresetWorkspace() {
             className="primary-button"
             type="button"
             onClick={startNewPreset}
-            disabled={isBusy}
+            disabled={isInteractionLocked}
           >
             새 Preset
           </button>
@@ -260,7 +282,7 @@ export default function ScanPresetWorkspace() {
                 form.id === preset.id ? "scan-preset-item active" : "scan-preset-item"
               }
               onClick={() => void selectPreset(preset.id)}
-              disabled={isBusy}
+              disabled={isInteractionLocked}
             >
               <span>
                 <strong>{preset.name}</strong>
@@ -277,17 +299,42 @@ export default function ScanPresetWorkspace() {
             <p className="eyebrow">{form.id ? "Edit Preset" : "New Preset"}</p>
             <h3>{form.id ? form.name || "Preset" : "새 Preset"}</h3>
           </div>
-          {form.id ? (
+          {form.id && !isConfirmingDelete ? (
             <button
               className="danger-button"
               type="button"
-              onClick={handleDelete}
+              onClick={requestDelete}
               disabled={isBusy}
             >
               삭제
             </button>
           ) : null}
         </div>
+
+        {isConfirmingDelete ? (
+          <div className="message error-message" role="alert" aria-live="assertive">
+            <strong>“{form.name}” Preset을 삭제하시겠습니까?</strong>
+            <p>삭제한 Preset은 복구할 수 없습니다.</p>
+            <div className="form-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={cancelDelete}
+                disabled={isDeleting}
+              >
+                취소
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => void confirmDelete()}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "삭제 중…" : "삭제 확인"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {notice ? <div className="message success-message">{notice}</div> : null}
         {error ? <div className="message error-message">{error}</div> : null}
@@ -300,7 +347,7 @@ export default function ScanPresetWorkspace() {
               maxLength={80}
               value={form.name}
               onChange={handleNameChange}
-              disabled={isBusy}
+              disabled={isInteractionLocked}
               placeholder="이름을 입력하십시오."
             />
           </label>
@@ -311,7 +358,7 @@ export default function ScanPresetWorkspace() {
               <ScanConditionCard
                 key={conditionKey(condition)}
                 condition={condition}
-                disabled={isBusy}
+                disabled={isInteractionLocked}
                 error={
                   fieldErrors[conditionKey(condition) + ":period"] ||
                   fieldErrors[conditionKey(condition) + ":threshold"] ||
@@ -330,7 +377,7 @@ export default function ScanPresetWorkspace() {
               className="primary-button strong"
               type="button"
               onClick={handleSave}
-              disabled={isBusy}
+              disabled={isInteractionLocked}
             >
               {form.id ? "저장" : "생성"}
             </button>
