@@ -2,9 +2,11 @@
 
 import { useState, useMemo } from "react";
 
-import type { ScanResult } from "./types";
+import type { ScanResult, ScanRunDetail } from "./types";
 import { filterResults, sortResults, filterByMatchMode } from "./model";
 import type { ResultFilter, ResultSort } from "./model";
+import ScanLineageTrail from "./ScanLineageTrail";
+import { useScanLineage } from "./useScanLineage";
 import styles from "./ScanResultsTable.module.css";
 
 const SORT_OPTIONS: { value: ResultSort["field"]; label: string }[] = [
@@ -14,6 +16,7 @@ const SORT_OPTIONS: { value: ResultSort["field"]; label: string }[] = [
   { value: "rsi", label: "RSI" },
   { value: "mfi", label: "MFI" },
   { value: "bollingerMiddle", label: "Bollinger Middle" },
+  { value: "matchedConditionCount", label: "Matched" },
 ];
 
 function formatNumber(value: number | null): string {
@@ -21,10 +24,11 @@ function formatNumber(value: number | null): string {
   return value.toFixed(2);
 }
 
-export default function ScanResultsTable({ results, runId, isLoading }: {
+export default function ScanResultsTable({ results, runId, isLoading, run }: {
   results: ScanResult[];
   runId: string;
   isLoading?: boolean;
+  run?: ScanRunDetail | null;
 }) {
   const [matchMode, setMatchMode] = useState<"and" | "or" | "none">("none");
   const [includeStale, setIncludeStale] = useState(true);
@@ -70,6 +74,12 @@ export default function ScanResultsTable({ results, runId, isLoading }: {
     return sortDir === "asc" ? "\u2191" : "\u2193";
   };
 
+  const { runs: lineageRuns, isLoading: lineageLoading } = useScanLineage(run ?? null);
+
+  const handleLineageRunSelect = (selectedRun: ScanRunDetail) => {
+    // Handled by parent via onRunSelect prop pattern
+  };
+
   if (isLoading) {
     return (
       <div className="panel">
@@ -112,6 +122,14 @@ export default function ScanResultsTable({ results, runId, isLoading }: {
           {sorted.length} result{sorted.length !== 1 ? "s" : ""}
         </span>
       </div>
+
+      {lineageRuns.length > 0 && !lineageLoading && (
+        <ScanLineageTrail
+          runs={lineageRuns}
+          currentRunId={runId}
+          onRunSelect={handleLineageRunSelect}
+        />
+      )}
 
       <div className={styles.filterBar}>
         <label className={styles.filterLabel}>
@@ -220,6 +238,13 @@ export default function ScanResultsTable({ results, runId, isLoading }: {
               >
                 Stale
               </th>
+              <th
+                className={`${styles.th} ${styles.thRight}`}
+                style={{ width: "70px" }}
+                onClick={() => handleSort("matchedConditionCount")}
+              >
+                Matched {sortIndicator("matchedConditionCount")}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -270,6 +295,9 @@ export default function ScanResultsTable({ results, runId, isLoading }: {
                   ) : (
                     <span className={styles.badgeMuted}>—</span>
                   )}
+                </td>
+                <td className={`${styles.cell} ${styles.cellRight}`}>
+                  {row.matchedConditionCount}
                 </td>
               </tr>
             ))}

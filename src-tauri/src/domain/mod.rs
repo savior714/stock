@@ -281,6 +281,7 @@ pub struct ScanResult {
     pub current_price: f64,
     pub indicators: IndicatorValues,
     pub matches: Vec<SignalMatch>,
+    pub matched_condition_count: u32,
     pub all_conditions_matched: bool,
     pub any_condition_matched: bool,
     pub data_stale: bool,

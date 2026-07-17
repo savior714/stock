@@ -1,6 +1,7 @@
 "use client";
 
 import ScanRunSetup from "@/features/scans/ScanRunSetup";
+import type { ScanRunDetail } from "@/features/scans/types";
 import type { WatchlistSummary } from "@/features/watchlists/types";
 import type { ScanPresetSummary } from "@/features/scan-presets/types";
 
@@ -16,6 +17,7 @@ type ScannerWorkspaceProps = {
   presetsLoading: boolean;
   presetsError: string | null;
   resumeRunId: string | null;
+  onResumeRunCompleted?: (run: ScanRunDetail) => void;
 };
 
 export default function ScannerWorkspace({
@@ -30,6 +32,7 @@ export default function ScannerWorkspace({
   presetsLoading,
   presetsError,
   resumeRunId,
+  onResumeRunCompleted,
 }: ScannerWorkspaceProps) {
   if (!resumeRunId && (!selectedWatchlistId || !watchlistExists)) {
     return (
@@ -53,6 +56,7 @@ export default function ScannerWorkspace({
       presetExists={presetExists}
       watchlistExists={watchlistExists}
       resumeRunId={resumeRunId}
+      onResumeRunCompleted={onResumeRunCompleted}
     />
   );
 }

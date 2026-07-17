@@ -562,6 +562,7 @@ where
                 bollinger_upper: first_bb.map(|b| b.upper),
             },
             matches: matches.to_vec(),
+            matched_condition_count: matches.iter().filter(|m| m.matched).count() as u32,
             all_conditions_matched: aggregate.all_matched,
             any_condition_matched: aggregate.any_matched,
             data_stale,

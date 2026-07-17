@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { formatAppError } from "@/lib/app-error";
 import { cancelScan, getScanErrors, getScanRun, retryScan } from "./api";
 import type { ScanError, ScanRunDetail } from "./types";
+import ScanLineageTrail from "./ScanLineageTrail";
+import { useScanLineage } from "./useScanLineage";
 import styles from "./ScanLogsPanel.module.css";
 
 type ScanLogsPanelProps = {
@@ -84,6 +86,13 @@ export default function ScanLogsPanel({
     loadErrors();
   }, [loadErrors]);
 
+  const { runs: lineageRuns, isLoading: lineageLoading } = useScanLineage(state.runDetail);
+
+  const handleLineageRunSelect = (selectedRun: ScanRunDetail) => {
+    // The parent handles run selection via handleRunSelect in page.tsx
+    // This is a no-op here since Logs panel doesn't navigate
+  };
+
   const retryableSymbols = getRetryableSymbols(state.errors);
   const retryableCount = retryableSymbols.length;
 
@@ -148,6 +157,14 @@ export default function ScanLogsPanel({
           </h3>
         </div>
       </div>
+
+      {lineageRuns.length > 0 && !lineageLoading && (
+        <ScanLineageTrail
+          runs={lineageRuns}
+          currentRunId={runId}
+          onRunSelect={handleLineageRunSelect}
+        />
+      )}
 
       {state.errors.length === 0 ? (
         <div className="empty-state" style={{ minHeight: "120px", padding: "20px" }}>

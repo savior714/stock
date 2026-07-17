@@ -37,6 +37,7 @@ export type ScanResult = {
   bollingerLower: number | null;
   bollingerMiddle: number | null;
   bollingerUpper: number | null;
+  matchedConditionCount: number;
   allConditionsMatched: boolean;
   anyConditionMatched: boolean;
   dataStale: boolean;

@@ -62,6 +62,7 @@ type ScanRunSetupProps = {
   presetExists: boolean;
   watchlistExists: boolean;
   resumeRunId: string | null;
+  onResumeRunCompleted?: (run: ScanRunDetail) => void;
 };
 
 export default function ScanRunSetup({
@@ -76,11 +77,13 @@ export default function ScanRunSetup({
   presetExists,
   watchlistExists,
   resumeRunId,
+  onResumeRunCompleted,
 }: ScanRunSetupProps) {
   const [state, setState] = useState<SetupState>(emptyState);
   const [presetConditionCount, setPresetConditionCount] = useState<number | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const consumedResumeRef = useRef<string | null>(null);
+  const notifiedTerminalRunsRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (externalPresetId && presetExists) {
@@ -104,6 +107,15 @@ export default function ScanRunSetup({
             clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
           }
+          if (
+            resumeRunId &&
+            detail.id === resumeRunId &&
+            detail.status === "completed" &&
+            !notifiedTerminalRunsRef.current.has(detail.id)
+          ) {
+            notifiedTerminalRunsRef.current.add(detail.id);
+            onResumeRunCompleted?.(detail);
+          }
           try {
             const errors = await getScanErrors(runId);
             setState((s) => ({ ...s, errors, isRunning: false, isCancelling: false }));
@@ -115,13 +127,14 @@ export default function ScanRunSetup({
         // polling error — keep trying
       }
     }, 2000);
-  }, []);
+  }, [resumeRunId, onResumeRunCompleted]);
 
   // ── Resume run initialization ──
   useEffect(() => {
     if (!resumeRunId) return;
     if (consumedResumeRef.current === resumeRunId) return;
     consumedResumeRef.current = resumeRunId;
+    notifiedTerminalRunsRef.current.clear();
 
     let cancelled = false;
 
@@ -138,6 +151,13 @@ export default function ScanRunSetup({
         }));
         if (detail.status === "running") {
           startPolling(resumeRunId);
+        } else if (
+          detail.id === resumeRunId &&
+          detail.status === "completed" &&
+          !notifiedTerminalRunsRef.current.has(detail.id)
+        ) {
+          notifiedTerminalRunsRef.current.add(detail.id);
+          onResumeRunCompleted?.(detail);
         }
       })
       .catch(() => {
@@ -156,7 +176,7 @@ export default function ScanRunSetup({
     return () => {
       cancelled = true;
     };
-  }, [resumeRunId, startPolling]);
+  }, [resumeRunId, startPolling, onResumeRunCompleted]);
 
   useEffect(() => {
     if (state.currentRunId && state.isRunning) {
@@ -190,11 +210,30 @@ export default function ScanRunSetup({
     }
   }, [state.currentRunId]);
 
+  const handleCompleted = useCallback((payload: ScanEventPayload) => {
+    if (payload.runId !== state.currentRunId) return;
+    if (
+      resumeRunId &&
+      payload.runId === resumeRunId &&
+      !notifiedTerminalRunsRef.current.has(payload.runId)
+    ) {
+      notifiedTerminalRunsRef.current.add(payload.runId);
+      getScanRun(payload.runId).then((detail) => {
+        if (detail.status === "completed") {
+          onResumeRunCompleted?.(detail);
+        }
+      }).catch(() => {
+        // ignore — polling will catch up
+      });
+    }
+  }, [state.currentRunId, resumeRunId, onResumeRunCompleted]);
+
   useEffect(() => {
     if (!state.currentRunId) return;
 
     let unsubProgress: (() => void) | null = null;
     let unsubResult: (() => void) | null = null;
+    let unsubCompleted: (() => void) | null = null;
 
     subscribeScanEvent("scan://progress", handleProgress).then((unsub) => {
       unsubProgress = unsub;
@@ -202,12 +241,16 @@ export default function ScanRunSetup({
     subscribeScanEvent("scan://result", handleResult).then((unsub) => {
       unsubResult = unsub;
     });
+    subscribeScanEvent("scan://completed", handleCompleted).then((unsub) => {
+      unsubCompleted = unsub;
+    });
 
     return () => {
       if (unsubProgress) unsubProgress();
       if (unsubResult) unsubResult();
+      if (unsubCompleted) unsubCompleted();
     };
-  }, [state.currentRunId, handleProgress, handleResult]);
+  }, [state.currentRunId, handleProgress, handleResult, handleCompleted]);
 
   useEffect(() => {
     return () => {

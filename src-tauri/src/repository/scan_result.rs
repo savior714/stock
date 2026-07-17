@@ -87,7 +87,8 @@ impl<'connection> ScanResultRepository<'connection> {
         let query = format!(
             "SELECT run_id, symbol, trade_date, current_price, \
              rsi, mfi, bollinger_lower, bollinger_middle, bollinger_upper, \
-             signal_flags_json, all_conditions_matched, any_condition_matched, data_stale \
+             signal_flags_json, matched_condition_count, \
+             all_conditions_matched, any_condition_matched, data_stale \
              FROM scan_results {where_clause} \
              ORDER BY symbol COLLATE NOCASE"
         );
@@ -113,6 +114,7 @@ impl<'connection> ScanResultRepository<'connection> {
                     row.get::<_, i32>(10)?,
                     row.get::<_, i32>(11)?,
                     row.get::<_, i32>(12)?,
+                    row.get::<_, i32>(13)?,
                 ))
             })
             .map_err(|error| db_error("failed to query ScanResults", error))?
@@ -133,6 +135,7 @@ impl<'connection> ScanResultRepository<'connection> {
                     bollinger_middle,
                     bollinger_upper,
                     signal_json,
+                    matched_count,
                     all_matched,
                     any_matched,
                     stale,
@@ -160,6 +163,7 @@ impl<'connection> ScanResultRepository<'connection> {
                         current_price,
                         indicators,
                         matches,
+                        matched_condition_count: matched_count as u32,
                         all_conditions_matched: all_matched == 1,
                         any_condition_matched: any_matched == 1,
                         data_stale: stale == 1,

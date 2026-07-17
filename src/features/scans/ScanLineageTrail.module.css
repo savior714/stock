@@ -1,0 +1,57 @@
+.lineageTrail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+.lineageNode {
+  display: flex;
+  align-items: center;
+}
+
+.lineageArrow {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  user-select: none;
+}
+
+.lineageButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.lineageButton:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border-focus);
+}
+
+.lineageButtonCurrent {
+  background: var(--color-surface-raised);
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+  cursor: default;
+  opacity: 0.85;
+}
+
+.lineageLabel {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.lineageShortId {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}

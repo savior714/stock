@@ -15,7 +15,8 @@ export type ResultSort = {
     | "mfi"
     | "bollingerLower"
     | "bollingerMiddle"
-    | "bollingerUpper";
+    | "bollingerUpper"
+    | "matchedConditionCount";
   direction: "asc" | "desc";
 };
 
@@ -74,6 +75,9 @@ export function sortResults(
         break;
       case "bollingerUpper":
         comparison = (a.bollingerUpper ?? -1) - (b.bollingerUpper ?? -1);
+        break;
+      case "matchedConditionCount":
+        comparison = a.matchedConditionCount - b.matchedConditionCount;
         break;
     }
 

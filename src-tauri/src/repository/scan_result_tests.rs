@@ -51,6 +51,11 @@ fn make_result(
     all_match: bool,
     any_match: bool,
 ) -> ScanResult {
+    let matches = vec![SignalMatch {
+        condition_id: SignalConditionId::new("cond-0000000000000001").expect("valid"),
+        matched: all_match,
+        newly_crossed: false,
+    }];
     ScanResult {
         run_id: run_id.clone(),
         symbol: Symbol::new(symbol).expect("valid symbol"),
@@ -63,11 +68,8 @@ fn make_result(
             bollinger_middle: Some(100.0),
             bollinger_upper: Some(105.0),
         },
-        matches: vec![SignalMatch {
-            condition_id: SignalConditionId::new("cond-0000000000000001").expect("valid"),
-            matched: all_match,
-            newly_crossed: false,
-        }],
+        matches,
+        matched_condition_count: if all_match { 1 } else { 0 },
         all_conditions_matched: all_match,
         any_condition_matched: any_match,
         data_stale: false,
@@ -243,6 +245,7 @@ fn preserves_null_indicators() {
             bollinger_upper: None,
         },
         matches: vec![],
+        matched_condition_count: 0,
         all_conditions_matched: false,
         any_condition_matched: false,
         data_stale: false,
@@ -286,6 +289,7 @@ fn encodes_and_decodes_signal_matches() {
                 newly_crossed: false,
             },
         ],
+        matched_condition_count: 1,
         all_conditions_matched: false,
         any_condition_matched: true,
         data_stale: false,
@@ -311,4 +315,80 @@ fn empty_run_returns_no_results() {
         .get_by_run(&run_id, ResultMatchFilter::None)
         .expect("ok");
     assert!(results.is_empty());
+}
+
+#[test]
+fn preserves_matched_condition_count_zero() {
+    let mut database = make_database();
+    let run_id = insert_scan_run(&mut database);
+    let mut repo = ScanResultRepository::new(&mut database);
+
+    let result = make_result(&run_id, "AAPL", 150.0, false, false);
+    assert_eq!(result.matched_condition_count, 0);
+    repo.upsert(&result).expect("ok");
+
+    let retrieved = repo
+        .get_by_run(&run_id, ResultMatchFilter::None)
+        .expect("ok");
+    assert_eq!(retrieved[0].matched_condition_count, 0);
+}
+
+#[test]
+fn preserves_matched_condition_count_positive() {
+    let mut database = make_database();
+    let run_id = insert_scan_run(&mut database);
+    let mut repo = ScanResultRepository::new(&mut database);
+
+    let result = make_result(&run_id, "AAPL", 150.0, true, true);
+    assert_eq!(result.matched_condition_count, 1);
+    repo.upsert(&result).expect("ok");
+
+    let retrieved = repo
+        .get_by_run(&run_id, ResultMatchFilter::None)
+        .expect("ok");
+    assert_eq!(retrieved[0].matched_condition_count, 1);
+}
+
+#[test]
+fn preserves_count_across_multiple_results() {
+    let mut database = make_database();
+    let run_id = insert_scan_run(&mut database);
+    let mut repo = ScanResultRepository::new(&mut database);
+
+    repo.upsert(&make_result(&run_id, "AAPL", 150.0, true, true))
+        .expect("ok");
+    repo.upsert(&make_result(&run_id, "MSFT", 300.0, false, true))
+        .expect("ok");
+    repo.upsert(&make_result(&run_id, "GOOGL", 120.0, true, true))
+        .expect("ok");
+
+    let results = repo
+        .get_by_run(&run_id, ResultMatchFilter::None)
+        .expect("ok");
+    assert_eq!(results.len(), 3);
+    // Results are ordered by symbol COLLATE NOCASE: AAPL, GOOGL, MSFT
+    assert_eq!(results[0].symbol.as_str(), "AAPL");
+    assert_eq!(results[0].matched_condition_count, 1);
+    assert_eq!(results[1].symbol.as_str(), "GOOGL");
+    assert_eq!(results[1].matched_condition_count, 1);
+    assert_eq!(results[2].symbol.as_str(), "MSFT");
+    assert_eq!(results[2].matched_condition_count, 0);
+}
+
+#[test]
+fn preserves_count_after_filtering() {
+    let mut database = make_database();
+    let run_id = insert_scan_run(&mut database);
+    let mut repo = ScanResultRepository::new(&mut database);
+
+    repo.upsert(&make_result(&run_id, "AAPL", 150.0, true, true))
+        .expect("ok");
+    repo.upsert(&make_result(&run_id, "MSFT", 300.0, false, true))
+        .expect("ok");
+
+    let and_results = repo
+        .get_by_run(&run_id, ResultMatchFilter::And)
+        .expect("ok");
+    assert_eq!(and_results.len(), 1);
+    assert_eq!(and_results[0].matched_condition_count, 1);
 }

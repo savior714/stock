@@ -7,6 +7,8 @@ import ScannerWorkspace from "@/features/scanner/ScannerWorkspace";
 import ScanResultsTable from "@/features/scans/ScanResultsTable";
 import ScanLogsPanel from "@/features/scans/ScanLogsPanel";
 import ScanRunHistory from "@/features/scans/ScanRunHistory";
+import ScanLineageTrail from "@/features/scans/ScanLineageTrail";
+import { useScanLineage } from "@/features/scans/useScanLineage";
 import WatchlistWorkspace from "@/features/watchlists/WatchlistWorkspace";
 import ScanPresetWorkspace from "@/features/scan-presets/ScanPresetWorkspace";
 import type { ScanRunDetail, ScanResult, ScanError } from "@/features/scans/types";
@@ -133,6 +135,36 @@ export default function Home() {
     setResumeRunId(retryRunId);
     setActive("Scanner");
   }, []);
+
+  const loadAndSelectRun = useCallback(
+    async (run: ScanRunDetail, destination: "Results" | "Logs") => {
+      setSelectedRun(run);
+      setIsLoadingResults(true);
+      try {
+        const [res, err] = await Promise.all([
+          getScanResults(run.id),
+          getScanErrors(run.id),
+        ]);
+        setResults(res);
+        setErrors(err);
+      } catch {
+        setResults([]);
+        setErrors([]);
+      } finally {
+        setIsLoadingResults(false);
+      }
+    },
+    [],
+  );
+
+  const handleResumeRunCompleted = useCallback(
+    async (run: ScanRunDetail) => {
+      setResumeRunId(null);
+      await loadAndSelectRun(run, "Results");
+      setActive("Results");
+    },
+    [loadAndSelectRun],
+  );
 
   const handleWatchlistSelect = useCallback((id: string) => {
     setResumeRunId(null);
@@ -324,6 +356,7 @@ export default function Home() {
               presetsLoading={presetsLoading}
               presetsError={presetsError}
               resumeRunId={resumeRunId}
+              onResumeRunCompleted={handleResumeRunCompleted}
             />
           )
         ) : active === "Results" ? (
@@ -332,6 +365,7 @@ export default function Home() {
               results={results}
               runId={selectedRun.id}
               isLoading={isLoadingResults}
+              run={selectedRun}
             />
           ) : (
             <ScanRunHistory onRunSelect={handleRunSelect} />
@@ -396,6 +430,8 @@ export default function Home() {
 }
 
 function RunDetailBanner({ run }: { run: ScanRunDetail }) {
+  const { runs: lineageRuns } = useScanLineage(run);
+
   return (
     <div className="panel" style={{ padding: "14px 20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", alignItems: "center" }}>
@@ -419,6 +455,12 @@ function RunDetailBanner({ run }: { run: ScanRunDetail }) {
         <span>Succeeded: {run.succeededSymbols}</span>
         <span>Failed: {run.failedSymbols}</span>
       </div>
+      {lineageRuns.length > 0 && (
+        <ScanLineageTrail
+          runs={lineageRuns}
+          currentRunId={run.id}
+        />
+      )}
     </div>
   );
 }
