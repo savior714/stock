@@ -34,6 +34,10 @@
   align-self: center;
 }
 
+.setupGrid {
+  width: 100%;
+}
+
 .setupControls {
   display: grid;
   gap: 12px;

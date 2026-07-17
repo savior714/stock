@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-
 import ScanRunSetup from "@/features/scans/ScanRunSetup";
 import type { WatchlistSummary } from "@/features/watchlists/types";
+import type { ScanPresetSummary } from "@/features/scan-presets/types";
 
 type ScannerWorkspaceProps = {
   selectedWatchlistId: string;
@@ -13,6 +12,7 @@ type ScannerWorkspaceProps = {
   onOpenWatchlistDrawer: () => void;
   onOpenPresetDrawer: () => void;
   watchlists: WatchlistSummary[];
+  presets: ScanPresetSummary[];
 };
 
 export default function ScannerWorkspace({
@@ -23,31 +23,13 @@ export default function ScannerWorkspace({
   onOpenWatchlistDrawer,
   onOpenPresetDrawer,
   watchlists,
+  presets,
 }: ScannerWorkspaceProps) {
-  const [setupVersion, setSetupVersion] = useState(0);
-
-  const handleDrawerClose = useCallback(() => {
-    setSetupVersion((v) => v + 1);
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        handleDrawerClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [handleDrawerClose]);
-
   const selectedWatchlist = watchlists.find(
     (w) => w.id === selectedWatchlistId,
   );
 
-  const hasSelection = selectedWatchlistId && selectedPresetId;
+  const presetExists = presets.some((p) => p.id === selectedPresetId);
 
   return (
     <div>
@@ -58,13 +40,14 @@ export default function ScannerWorkspace({
         </div>
       ) : (
         <ScanRunSetup
-          key={setupVersion}
           selectedWatchlistId={selectedWatchlistId}
           onWatchlistIdChange={onWatchlistIdChange}
           selectedPresetId={selectedPresetId}
           onPresetIdChange={onPresetIdChange}
           watchlists={watchlists}
-          onDrawerOpen={handleDrawerClose}
+          presets={presets}
+          onOpenPresetDrawer={onOpenPresetDrawer}
+          presetExists={presetExists}
         />
       )}
     </div>

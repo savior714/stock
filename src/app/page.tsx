@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useCallback as useCb } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Sidebar from "@/components/Sidebar";
 import ScannerWorkspace from "@/features/scanner/ScannerWorkspace";
@@ -13,9 +13,58 @@ import type { ScanRunDetail, ScanResult, ScanError } from "@/features/scans/type
 import { getScanResults, getScanErrors } from "@/features/scans/api";
 import { listWatchlists } from "@/features/watchlists/api";
 import type { WatchlistSummary } from "@/features/watchlists/types";
+import { listScanPresets } from "@/features/scan-presets/api";
+import type { ScanPresetSummary } from "@/features/scan-presets/types";
+import { reconcileSelectedId } from "@/lib/scanner-utils";
+import { ThemeContext } from "@/lib/theme";
+import type { ThemeMode } from "@/lib/theme";
 
 type Section = "Scanner" | "Results" | "Logs";
 type DrawerView = "watchlists" | "presets" | null;
+
+function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const focusableSelectors = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    const focusableElements = Array.from(
+      container.querySelectorAll<HTMLElement>(focusableSelectors),
+    ).filter((el) => el.offsetParent !== null);
+
+    if (focusableElements.length === 0) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    container.addEventListener("keydown", handleKeyDown);
+    return () => container.removeEventListener("keydown", handleKeyDown);
+  }, [containerRef]);
+}
 
 export default function Home() {
   const [active, setActive] = useState<Section>("Scanner");
@@ -30,28 +79,86 @@ export default function Home() {
   const [watchlistLoading, setWatchlistLoading] = useState(true);
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
 
+  const [presets, setPresets] = useState<ScanPresetSummary[]>([]);
+  const [presetLoading, setPresetLoading] = useState(true);
+  const [presetError, setPresetError] = useState<string | null>(null);
+
   const [drawer, setDrawer] = useState<DrawerView>(null);
+  const [previousFocus, setPreviousFocus] = useState<HTMLElement | null>(null);
+
+  const drawerRef = useRef<HTMLElement | null>(null);
+  useFocusTrap(drawerRef);
+
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === "undefined") return "light";
+    const stored = localStorage.getItem("stock-theme");
+    if (stored === "light" || stored === "dark" || stored === "system") {
+      return stored;
+    }
+    return "light";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme =
+      theme === "system"
+        ? window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light"
+        : theme;
+  }, [theme]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setWatchlistLoading(true);
     setWatchlistError(null);
+    setPresetLoading(true);
+    setPresetError(null);
     let cancelled = false;
-    listWatchlists()
-      .then((data) => {
-        if (!cancelled) setWatchlists(data);
+    Promise.all([listWatchlists(), listScanPresets()])
+      .then(([wlData, presetData]) => {
+        if (!cancelled) {
+          setWatchlists(wlData);
+          setPresets(presetData);
+          setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlData));
+          setSelectedPresetId((prev) => reconcileSelectedId(prev, presetData));
+        }
       })
       .catch(() => {
-        if (!cancelled) setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
+        if (!cancelled) {
+          setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
+          setPresetError("Preset 목록을 불러오지 못했습니다.");
+        }
       })
       .finally(() => {
-        if (!cancelled) setWatchlistLoading(false);
+        if (!cancelled) {
+          setWatchlistLoading(false);
+          setPresetLoading(false);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  const refreshScannerResources = useCallback(() => {
+    let cancelled = false;
+    Promise.all([listWatchlists(), listScanPresets()])
+      .then(([wlData, presetData]) => {
+        if (!cancelled) {
+          setWatchlists(wlData);
+          setPresets(presetData);
+          setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlData));
+          setSelectedPresetId((prev) => reconcileSelectedId(prev, presetData));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
+          setPresetError("Preset 목록을 불러오지 못했습니다.");
+        }
+      });
+  }, []);
 
   const handleRunSelect = useCallback(async (run: ScanRunDetail) => {
     setSelectedRun(run);
@@ -87,24 +194,26 @@ export default function Home() {
   }, [active]);
 
   const handleOpenWatchlistDrawer = useCallback(() => {
+    setPreviousFocus(document.activeElement as HTMLElement | null);
     setDrawer("watchlists");
+    document.body.style.overflow = "hidden";
   }, []);
 
   const handleOpenPresetDrawer = useCallback(() => {
+    setPreviousFocus(document.activeElement as HTMLElement | null);
     setDrawer("presets");
+    document.body.style.overflow = "hidden";
   }, []);
 
   const closeDrawer = useCallback(() => {
     setDrawer(null);
-    let cancelled = false;
-    listWatchlists()
-      .then((data) => {
-        if (!cancelled) setWatchlists(data);
-      })
-      .catch(() => {
-        if (!cancelled) setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
-      });
-  }, []);
+    document.body.style.overflow = "";
+    if (previousFocus) {
+      (previousFocus as HTMLElement).focus();
+      setPreviousFocus(null);
+    }
+    refreshScannerResources();
+  }, [previousFocus, refreshScannerResources]);
 
   const handlePresetChange = useCallback((id: string) => {
     setSelectedPresetId(id);
@@ -114,6 +223,8 @@ export default function Home() {
     watchlists: "Watchlists 관리",
     presets: "Scan Presets 관리",
   };
+
+  const drawerId = "drawer-title";
 
   return (
     <main className="app-shell">
@@ -127,6 +238,8 @@ export default function Home() {
         onOpenPresetDrawer={handleOpenPresetDrawer}
         watchlistLoading={watchlistLoading}
         watchlistError={watchlistError}
+        theme={theme}
+        onThemeChange={setTheme}
       />
 
       <section className="workspace">
@@ -173,6 +286,7 @@ export default function Home() {
               onOpenWatchlistDrawer={handleOpenWatchlistDrawer}
               onOpenPresetDrawer={handleOpenPresetDrawer}
               watchlists={watchlists}
+              presets={presets}
             />
           )
         ) : active === "Results" ? (
@@ -214,14 +328,15 @@ export default function Home() {
           }}
         >
           <aside
+            ref={drawerRef}
             className="drawer"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="drawer-title"
+            aria-labelledby={drawerId}
           >
             <header className="drawer-header">
               <div>
-                <h3 id="drawer-title">{drawerTitle[drawer]}</h3>
+                <h3 id={drawerId}>{drawerTitle[drawer]}</h3>
               </div>
               <button
                 className="close-button"

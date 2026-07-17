@@ -4,22 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatAppError } from "@/lib/app-error";
 import styles from "./ScanRunSetup.module.css";
-import { cancelScan, getScanErrors, getScanRun, listScanRuns, startScan } from "./api";
+import { cancelScan, getScanErrors, getScanRun, startScan } from "./api";
 import { subscribeScanEvent, unsubscribeAll } from "./events";
 import type {
   ScanError,
   ScanEventPayload,
   ScanRunDetail,
-  ScanRunSummary,
 } from "./types";
-import { listWatchlists } from "@/features/watchlists/api";
 import type { WatchlistSummary } from "@/features/watchlists/types";
-import { listScanPresets } from "@/features/scan-presets/api";
 import type { ScanPresetSummary } from "@/features/scan-presets/types";
 
 type SetupState = {
-  watchlists: Array<{ id: string; name: string }>;
-  presets: Array<{ id: string; name: string }>;
   isRunning: boolean;
   currentRunId: string | null;
   runDetail: ScanRunDetail | null;
@@ -31,8 +26,6 @@ type SetupState = {
 };
 
 const emptyState: SetupState = {
-  watchlists: [],
-  presets: [],
   isRunning: false,
   currentRunId: null,
   runDetail: null,
@@ -62,7 +55,9 @@ type ScanRunSetupProps = {
   selectedPresetId: string;
   onPresetIdChange: (id: string) => void;
   watchlists: WatchlistSummary[];
-  onDrawerOpen: () => void;
+  presets: ScanPresetSummary[];
+  onOpenPresetDrawer: () => void;
+  presetExists: boolean;
 };
 
 export default function ScanRunSetup({
@@ -71,46 +66,22 @@ export default function ScanRunSetup({
   selectedPresetId: externalPresetId,
   onPresetIdChange,
   watchlists,
-  onDrawerOpen,
+  presets,
+  onOpenPresetDrawer,
+  presetExists,
 }: ScanRunSetupProps) {
   const [state, setState] = useState<SetupState>(emptyState);
   const [presetConditionCount, setPresetConditionCount] = useState<number | null>(null);
-  const [isLoadingPresets, setIsLoadingPresets] = useState(true);
-  const [allPresets, setAllPresets] = useState<ScanPresetSummary[]>([]);
   const pollTimerRef = useRef<number | null>(null);
 
-  const loadInitialData = useCallback(async () => {
-    try {
-      const presets = await listScanPresets();
-      setAllPresets(presets);
-    } catch (error) {
-      setState((s) => ({ ...s, globalError: formatAppError(error) }));
-    } finally {
-      setIsLoadingPresets(false);
-    }
-  }, []);
-
   useEffect(() => {
-    let cancelled = false;
-    void loadInitialData().catch(() => {
-      if (!cancelled) {
-        setState((s) => ({ ...s, globalError: "목록을 불러오지 못했습니다." }));
-        setIsLoadingPresets(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadInitialData]);
-
-  useEffect(() => {
-    if (externalPresetId) {
-      const found = allPresets.find((p) => p.id === externalPresetId);
+    if (externalPresetId && presetExists) {
+      const found = presets.find((p) => p.id === externalPresetId);
       setPresetConditionCount(found?.enabledConditionCount ?? null);
     } else {
       setPresetConditionCount(null);
     }
-  }, [externalPresetId, allPresets]);
+  }, [externalPresetId, presets, presetExists]);
 
   const startPolling = useCallback((runId: string) => {
     if (pollTimerRef.current) {
@@ -247,22 +218,14 @@ export default function ScanRunSetup({
     }
   }, [state.currentRunId, state.isCancelling]);
 
-  const handleReset = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    setState(emptyState);
-    setPresetConditionCount(null);
-  }, []);
-
   const canStart =
     externalWatchlistId &&
     externalPresetId &&
+    presetExists &&
     !state.isRunning &&
     !state.isLoading;
 
-  const selectedPreset = allPresets.find((p) => p.id === externalPresetId);
+  const selectedPreset = presets.find((p) => p.id === externalPresetId);
   const selectedWatchlist = watchlists.find(
     (w) => w.id === externalWatchlistId,
   );
@@ -270,10 +233,6 @@ export default function ScanRunSetup({
   const watchlistSymbolCount = watchlists.find(
     (w) => w.id === externalWatchlistId,
   ) as WatchlistSummary | undefined;
-
-  if (isLoadingPresets) {
-    return <div className={styles.setupLoading}>목록을 불러오는 중입니다.</div>;
-  }
 
   return (
     <div className={styles.setupArea}>
@@ -290,7 +249,7 @@ export default function ScanRunSetup({
           <button
             className="secondary-button"
             type="button"
-            onClick={onDrawerOpen}
+            onClick={onOpenPresetDrawer}
           >
             Preset 편집
           </button>
@@ -298,13 +257,7 @@ export default function ScanRunSetup({
       </div>
 
       <div className={styles.setupControls}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "12px",
-          }}
-        >
+        <div className={styles.setupGrid}>
           <div className={styles.setupSelectGroup}>
             <label>Scan Preset</label>
             <select
@@ -313,7 +266,7 @@ export default function ScanRunSetup({
               disabled={state.isRunning}
             >
               <option value="">-- 선택 --</option>
-              {allPresets.map((p) => (
+              {presets.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -322,7 +275,7 @@ export default function ScanRunSetup({
           </div>
         </div>
 
-        {externalWatchlistId && externalPresetId && (
+        {externalWatchlistId && externalPresetId && presetExists && (
           <div className={styles.setupInfo}>
             <span>
               {presetConditionCount !== null
@@ -341,20 +294,22 @@ export default function ScanRunSetup({
           <div className={styles.setupEmptySelect}>
             Watchlist과 Preset을 모두 선택하십시오.
           </div>
+        ) : externalWatchlistId && !externalPresetId ? (
+          <div className={styles.setupEmptySelect} aria-live="polite">
+            Scan Preset을 선택하십시오.
+          </div>
         ) : null}
 
         {(externalWatchlistId || externalPresetId) && (
           <div className={styles.setupActions}>
             {state.isRunning ? (
-              <>
-                <button
-                  className="scan-button"
-                  type="button"
-                  onClick={handleCancel}
-                >
-                  {state.isCancelling ? "취소 중…" : "실행 취소"}
-                </button>
-              </>
+              <button
+                className="scan-button"
+                type="button"
+                onClick={handleCancel}
+              >
+                {state.isCancelling ? "취소 중…" : "실행 취소"}
+              </button>
             ) : (
               <button
                 className="primary-button strong"
