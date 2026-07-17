@@ -75,6 +75,7 @@ export default function WatchlistWorkspace() {
   const [symbolNotice, setSymbolNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [undoRemoval, setUndoRemoval] = useState<UndoRemoval | null>(null);
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
 
   const detailRequestRef = useRef(0);
   const operationRef = useRef(false);
@@ -87,6 +88,8 @@ export default function WatchlistWorkspace() {
 
   const isBlocking = isLoadingDetail || isSaving;
   const isBusy = isBlocking || isSyncingSymbols;
+  const isConfirmingDelete = Boolean(form.id && deleteConfirmationId === form.id);
+  const isInteractionLocked = isBusy || isConfirmingDelete;
 
   const clearUndo = useCallback(() => {
     if (undoTimerRef.current !== null) {
@@ -102,6 +105,7 @@ export default function WatchlistWorkspace() {
       persistedMetaRef.current = detailToMeta(detail);
       persistedSymbolsRef.current = [...detail.symbols];
       desiredSymbolsRef.current = [...detail.symbols];
+      setDeleteConfirmationId(null);
       setForm(detailToForm(detail));
       setSymbolInput("");
       setSymbolNotice(null);
@@ -156,6 +160,7 @@ export default function WatchlistWorkspace() {
       operationRef.current = true;
       const requestId = detailRequestRef.current + 1;
       detailRequestRef.current = requestId;
+      setDeleteConfirmationId(null);
       setIsLoadingDetail(true);
       setError(null);
       setNotice(null);
@@ -192,6 +197,7 @@ export default function WatchlistWorkspace() {
     persistedMetaRef.current = null;
     persistedSymbolsRef.current = [];
     desiredSymbolsRef.current = [];
+    setDeleteConfirmationId(null);
     setForm(emptyWatchlistForm());
     setSymbolInput("");
     setError(null);
@@ -371,7 +377,7 @@ export default function WatchlistWorkspace() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (operationRef.current || symbolSyncRef.current) {
+    if (operationRef.current || symbolSyncRef.current || deleteConfirmationId) {
       return;
     }
 
@@ -416,11 +422,33 @@ export default function WatchlistWorkspace() {
     }
   }
 
-  async function removeSelected() {
+  function requestDelete() {
     if (!form.id || operationRef.current || symbolSyncRef.current) {
       return;
     }
-    if (!window.confirm(`"${form.name}" Watchlist를 삭제하시겠습니까?`)) {
+
+    setError(null);
+    setNotice(null);
+    setSymbolNotice(null);
+    setFieldErrors({});
+    clearUndo();
+    setDeleteConfirmationId(form.id);
+  }
+
+  function cancelDelete() {
+    if (!operationRef.current) {
+      setDeleteConfirmationId(null);
+    }
+  }
+
+  async function confirmDelete() {
+    const watchlistId = form.id;
+    if (
+      !watchlistId ||
+      deleteConfirmationId !== watchlistId ||
+      operationRef.current ||
+      symbolSyncRef.current
+    ) {
       return;
     }
 
@@ -433,11 +461,12 @@ export default function WatchlistWorkspace() {
     clearUndo();
 
     try {
-      await deleteWatchlist(form.id);
+      await deleteWatchlist(watchlistId);
       activeWatchlistIdRef.current = null;
       persistedMetaRef.current = null;
       persistedSymbolsRef.current = [];
       desiredSymbolsRef.current = [];
+      setDeleteConfirmationId(null);
       setForm(emptyWatchlistForm());
       setSymbolInput("");
       await refreshList();
@@ -462,7 +491,7 @@ export default function WatchlistWorkspace() {
             className="primary-button"
             type="button"
             onClick={startNewWatchlist}
-            disabled={isBusy}
+            disabled={isInteractionLocked}
           >
             새 목록
           </button>
@@ -483,7 +512,7 @@ export default function WatchlistWorkspace() {
               type="button"
               className={form.id === watchlist.id ? "watchlist-item active" : "watchlist-item"}
               onClick={() => void selectWatchlist(watchlist.id)}
-              disabled={isBusy}
+              disabled={isInteractionLocked}
             >
               <span>
                 <strong>{watchlist.name}</strong>
@@ -501,7 +530,7 @@ export default function WatchlistWorkspace() {
             <p className="eyebrow">{form.id ? "Edit Watchlist" : "New Watchlist"}</p>
             <h3>{form.id ? form.name || "Watchlist" : "새 Watchlist"}</h3>
           </div>
-          {form.id ? (
+          {form.id && !isConfirmingDelete ? (
             <details className={styles.watchlistMenu}>
               <summary aria-label="Watchlist 메뉴">•••</summary>
               <div className={styles.watchlistMenuPopover}>
@@ -509,7 +538,7 @@ export default function WatchlistWorkspace() {
                   className={styles.menuDangerButton}
                   type="button"
                   disabled={isBusy}
-                  onClick={() => void removeSelected()}
+                  onClick={requestDelete}
                 >
                   Watchlist 삭제
                 </button>
@@ -517,6 +546,31 @@ export default function WatchlistWorkspace() {
             </details>
           ) : null}
         </div>
+
+        {isConfirmingDelete ? (
+          <div className="message error-message" role="alert" aria-live="assertive">
+            <strong>“{form.name}” Watchlist를 삭제하시겠습니까?</strong>
+            <p>삭제한 Watchlist는 복구할 수 없습니다.</p>
+            <div className="form-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={cancelDelete}
+                disabled={isSaving}
+              >
+                취소
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => void confirmDelete()}
+                disabled={isSaving}
+              >
+                {isSaving ? "삭제 중…" : "삭제 확인"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <form
           className="watchlist-form"
@@ -527,7 +581,7 @@ export default function WatchlistWorkspace() {
             <input
               value={form.name}
               maxLength={80}
-              disabled={isBusy}
+              disabled={isInteractionLocked}
               placeholder="예: 전체 종목, 빅테크, 장기 매수 후보"
               onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 setForm((current) => ({ ...current, name: event.target.value }))
@@ -541,7 +595,7 @@ export default function WatchlistWorkspace() {
             <input
               value={form.description}
               maxLength={500}
-              disabled={isBusy}
+              disabled={isInteractionLocked}
               placeholder="선택 사항"
               onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 setForm((current) => ({ ...current, description: event.target.value }))
@@ -564,7 +618,9 @@ export default function WatchlistWorkspace() {
               <input
                 aria-label="추가할 티커"
                 value={symbolInput}
-                disabled={isBlocking || form.symbols.length >= MAX_WATCHLIST_SYMBOLS}
+                disabled={
+                  isBlocking || isConfirmingDelete || form.symbols.length >= MAX_WATCHLIST_SYMBOLS
+                }
                 placeholder="예: AAPL 또는 AAPL, MSFT, NVDA"
                 autoCapitalize="characters"
                 spellCheck={false}
@@ -578,6 +634,7 @@ export default function WatchlistWorkspace() {
                 type="button"
                 disabled={
                   isBlocking ||
+                  isConfirmingDelete ||
                   form.symbols.length >= MAX_WATCHLIST_SYMBOLS ||
                   symbolInput.trim().length === 0
                 }
@@ -597,7 +654,7 @@ export default function WatchlistWorkspace() {
                     <button
                       type="button"
                       aria-label={`${symbol} 삭제`}
-                      disabled={isBlocking}
+                      disabled={isBlocking || isConfirmingDelete}
                       onClick={() => removeTicker(symbol)}
                     >
                       ×
@@ -635,7 +692,7 @@ export default function WatchlistWorkspace() {
             <button
               className="secondary-button"
               type="button"
-              disabled={isBusy}
+              disabled={isInteractionLocked}
               onClick={startNewWatchlist}
             >
               초기화
@@ -643,7 +700,7 @@ export default function WatchlistWorkspace() {
             <button
               className="primary-button strong"
               type="submit"
-              disabled={isBusy || form.symbols.length > MAX_WATCHLIST_SYMBOLS}
+              disabled={isInteractionLocked || form.symbols.length > MAX_WATCHLIST_SYMBOLS}
             >
               {isSaving ? "저장 중…" : form.id ? "이름·설명 저장" : "Watchlist 생성"}
             </button>
