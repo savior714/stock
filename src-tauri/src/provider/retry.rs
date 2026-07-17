@@ -51,7 +51,7 @@ impl<P: MarketDataProvider> RetryConcurrentProvider<P> {
         Err(last_error.unwrap_or_else(|| {
             AppError::new(
                 AppErrorCode::ProviderUnavailable,
-                format!("{} fetch exhausted all attempts", symbol),
+                format!("{symbol} fetch exhausted all attempts"),
             )
         }))
     }

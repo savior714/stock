@@ -81,16 +81,11 @@ mod tests {
         assert_eq!(result.len(), closes.len());
         // First 5 are None, rest are Some(100.0)
         for (i, val) in result.iter().enumerate().take(5) {
-            assert!(val.is_none(), "index {} should be None", i);
+            assert!(val.is_none(), "index {i} should be None");
         }
         for (i, val) in result.iter().enumerate().skip(5) {
             let v = val.unwrap();
-            assert!(
-                (v - 100.0).abs() < 1e-9,
-                "index {} expected 100, got {}",
-                i,
-                v
-            );
+            assert!((v - 100.0).abs() < 1e-9, "index {i} expected 100, got {v}");
         }
     }
 
@@ -100,11 +95,11 @@ mod tests {
         let closes: Vec<f64> = (0..=20).map(|v| (100 - v) as f64).collect();
         let result = calculate_rsi(&closes, 5).unwrap();
         for (i, val) in result.iter().enumerate().take(5) {
-            assert!(val.is_none(), "index {} should be None", i);
+            assert!(val.is_none(), "index {i} should be None");
         }
         for (i, val) in result.iter().enumerate().skip(5) {
             let v = val.unwrap();
-            assert!((v - 0.0).abs() < 1e-9, "index {} expected 0, got {}", i, v);
+            assert!((v - 0.0).abs() < 1e-9, "index {i} expected 0, got {v}");
         }
     }
 
@@ -117,12 +112,7 @@ mod tests {
         }
         for (i, val) in result.iter().enumerate().skip(5) {
             let v = val.unwrap();
-            assert!(
-                (v - 50.0).abs() < 1e-9,
-                "index {} expected 50, got {}",
-                i,
-                v
-            );
+            assert!((v - 50.0).abs() < 1e-9, "index {i} expected 50, got {v}");
         }
     }
 
@@ -134,7 +124,7 @@ mod tests {
         let result = calculate_rsi(&closes, 14).unwrap();
         assert_eq!(result.len(), 20);
         for (i, val) in result.iter().enumerate().take(14) {
-            assert!(val.is_none(), "index {} should be None", i);
+            assert!(val.is_none(), "index {i} should be None");
         }
         assert!(result[14].is_some(), "index 14 should be Some");
         assert!(result[15].is_some());
@@ -157,7 +147,7 @@ mod tests {
         assert!(result[0].is_none());
         assert!(result[1].is_none());
         let val = result[2].unwrap();
-        assert!((val - 30.0).abs() < 1e-6, "expected RSI=30, got {}", val);
+        assert!((val - 30.0).abs() < 1e-6, "expected RSI=30, got {val}");
     }
 
     #[test]
@@ -171,7 +161,7 @@ mod tests {
         assert!(result[0].is_none());
         assert!(result[1].is_none());
         let val = result[2].unwrap();
-        assert!((val - 70.0).abs() < 1e-6, "expected RSI=70, got {}", val);
+        assert!((val - 70.0).abs() < 1e-6, "expected RSI=70, got {val}");
     }
 
     // ---- Known fixture (period=2, hand-calculated) ----

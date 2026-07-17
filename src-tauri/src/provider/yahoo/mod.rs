@@ -58,7 +58,7 @@ impl MarketDataProvider for YahooMarketDataProvider {
             .map_err(|error| {
                 AppError::new(
                     crate::error::AppErrorCode::ProviderUnavailable,
-                    format!("Yahoo request failed for {}", symbol),
+                    format!("Yahoo request failed for {symbol}"),
                 )
                 .with_detail(error.to_string())
                 .retryable(true)
@@ -69,7 +69,7 @@ impl MarketDataProvider for YahooMarketDataProvider {
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err(AppError::new(
                 crate::error::AppErrorCode::ProviderRateLimited,
-                format!("Yahoo rate limited for {}", symbol),
+                format!("Yahoo rate limited for {symbol}"),
             )
             .retryable(true));
         }
@@ -77,23 +77,23 @@ impl MarketDataProvider for YahooMarketDataProvider {
         if status == reqwest::StatusCode::NOT_FOUND {
             return Err(AppError::new(
                 crate::error::AppErrorCode::NotFound,
-                format!("No chart data found for {}", symbol),
+                format!("No chart data found for {symbol}"),
             ));
         }
 
         if !status.is_success() {
             return Err(AppError::new(
                 crate::error::AppErrorCode::ProviderUnavailable,
-                format!("Yahoo returned status {} for {}", status, symbol),
+                format!("Yahoo returned status {status} for {symbol}"),
             )
-            .with_detail(format!("status: {}", status))
+            .with_detail(format!("status: {status}"))
             .retryable(true));
         }
 
         let body = response.text().await.map_err(|error| {
             AppError::new(
                 crate::error::AppErrorCode::InvalidMarketData,
-                format!("failed to read Yahoo response body for {}", symbol),
+                format!("failed to read Yahoo response body for {symbol}"),
             )
             .with_detail(error.to_string())
         })?;

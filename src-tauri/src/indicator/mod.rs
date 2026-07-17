@@ -191,8 +191,7 @@ pub fn assert_lengths_match(lengths: &[usize]) -> AppResult<()> {
     for (i, &len) in lengths.iter().enumerate().skip(1) {
         if len != expected_len {
             return Err(AppError::validation(format!(
-                "input slice {} length {} does not match first slice length {}",
-                i, len, expected_len
+                "input slice {i} length {len} does not match first slice length {expected_len}"
             )));
         }
     }
