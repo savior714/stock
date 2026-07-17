@@ -6,36 +6,46 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   ci:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          ref: ${{ github.head_ref }}
+          node-version: "20"
+          cache: "npm"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.88.0
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
-      - name: Format Rust
-        run: cd src-tauri && cargo fmt
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
 
-      - name: Commit Rust formatting
-        run: |
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src-tauri/src
-          git commit -m "style: format Rust sources"
-          git push origin HEAD:${GITHUB_HEAD_REF}
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Verify Rust formatting
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Rust fmt
         run: cd src-tauri && cargo fmt --check
+
+      - name: Rust clippy
+        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Rust test
+        run: cd src-tauri && cargo test
