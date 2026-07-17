@@ -29,14 +29,14 @@ describe("mock scan - full success", async () => {
       presetId: "preset-2",
     });
 
-    // preset-2 = 9 symbols, tick through all of them
-    for (let i = 0; i < 9; i++) {
+    // wl-1 = 5 symbols, tick through all of them
+    for (let i = 0; i < 5; i++) {
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
     }
 
     expect(events).toContain("started");
     expect(events).toContain("completed");
-    expect(events.filter((e) => e === "progress").length).toBe(9);
+    expect(events.filter((e) => e === "progress").length).toBe(5);
 
     const run = await client.scans.getRun(runId);
     expect(run.status).toBe("completed");
@@ -69,8 +69,8 @@ describe("mock scan - partial failure", async () => {
       presetId: "preset-3",
     });
 
-    // preset-3 = 9 symbols
-    for (let i = 0; i < 9; i++) {
+    // wl-1 = 5 symbols
+    for (let i = 0; i < 5; i++) {
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
     }
 
@@ -111,12 +111,12 @@ describe("mock scan - cancel", async () => {
       presetId: "preset-4",
     });
 
-    // preset-4 = 9 symbols, advance 1 then cancel
+    // wl-1 = 5 symbols, advance 1 then cancel
     (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
     await client.scans.cancel(runId);
 
     // Try to advance remaining symbols - should be no-ops
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 4; i++) {
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
     }
 
@@ -146,7 +146,7 @@ describe("mock scan - cancel", async () => {
     await client.scans.cancel(runId);
 
     const progressBefore = progressEvents.length;
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 4; i++) {
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
     }
     const progressAfter = progressEvents.length;
@@ -169,11 +169,13 @@ describe("mock scan - run history", async () => {
     const runId2 = await client.scans.start({ watchlistId: "wl-2", presetId: "preset-1" });
     const runId3 = await client.scans.start({ watchlistId: "wl-1", presetId: "preset-3" });
 
-    // Complete all runs
-    for (let i = 0; i < 9; i++) {
+    // Complete all runs (5 symbols each for wl-1, 4 for wl-2)
+    for (let i = 0; i < 5; i++) {
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId1);
-      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId2);
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId3);
+    }
+    for (let i = 0; i < 4; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId2);
     }
 
     const runs = await client.scans.listRuns();
@@ -188,7 +190,8 @@ describe("mock scan - run history", async () => {
       presetId: "preset-3",
     });
 
-    for (let i = 0; i < 9; i++) {
+    // wl-1 = 5 symbols
+    for (let i = 0; i < 5; i++) {
       (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
     }
 

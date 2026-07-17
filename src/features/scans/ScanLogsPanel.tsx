@@ -3,14 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatAppError } from "@/lib/app-error";
-import { cancelScan, getScanErrors, getScanRun, startScan } from "./api";
+import { cancelScan, getScanErrors, getScanRun, retryScan } from "./api";
 import type { ScanError, ScanRunDetail } from "./types";
 import styles from "./ScanLogsPanel.module.css";
 
 type ScanLogsPanelProps = {
   runId: string;
-  presetId: string;
-  watchlistId: string;
   onRetry: (retryRunId: string) => void;
 };
 
@@ -19,7 +17,7 @@ type PanelState = {
   runDetail: ScanRunDetail | null;
   isLoading: boolean;
   globalError: string;
-  retryingSymbol: string | null;
+  retrying: boolean;
 };
 
 const COLUMN_WIDTHS = {
@@ -28,6 +26,16 @@ const COLUMN_WIDTHS = {
   attempt: "60px",
   retryable: "90px",
 };
+
+function getRetryableSymbols(errors: ScanError[]): string[] {
+  const retryableSet = new Set<string>();
+  for (const err of errors) {
+    if (err.retryable && err.symbol !== null) {
+      retryableSet.add(err.symbol);
+    }
+  }
+  return Array.from(retryableSet);
+}
 
 function RetryBadge({ retryable }: { retryable: boolean }) {
   return (
@@ -39,8 +47,6 @@ function RetryBadge({ retryable }: { retryable: boolean }) {
 
 export default function ScanLogsPanel({
   runId,
-  presetId,
-  watchlistId,
   onRetry,
 }: ScanLogsPanelProps) {
   const [state, setState] = useState<PanelState>({
@@ -48,7 +54,7 @@ export default function ScanLogsPanel({
     runDetail: null,
     isLoading: true,
     globalError: "",
-    retryingSymbol: null,
+    retrying: false,
   });
 
   const loadErrors = useCallback(async () => {
@@ -63,7 +69,7 @@ export default function ScanLogsPanel({
         runDetail,
         isLoading: false,
         globalError: "",
-        retryingSymbol: null,
+        retrying: false,
       });
     } catch (err) {
       setState((prev) => ({
@@ -78,17 +84,18 @@ export default function ScanLogsPanel({
     loadErrors();
   }, [loadErrors]);
 
-  const retryableErrors = state.errors.filter((e) => e.retryable);
+  const retryableSymbols = getRetryableSymbols(state.errors);
+  const retryableCount = retryableSymbols.length;
 
   const handleRetry = async () => {
-    setState((prev) => ({ ...prev, retryingSymbol: "all" }));
+    setState((prev) => ({ ...prev, retrying: true }));
     try {
-      const newRunId = await startScan({ watchlistId, presetId });
+      const newRunId = await retryScan(runId);
       onRetry(newRunId);
     } catch (err) {
       setState((prev) => ({
         ...prev,
-        retryingSymbol: null,
+        retrying: false,
         globalError: formatAppError(err),
       }));
     }
@@ -232,17 +239,17 @@ export default function ScanLogsPanel({
         </div>
       )}
 
-      {isRetryable && retryableErrors.length > 0 && (
+      {isRetryable && retryableCount > 0 && (
         <div className={styles.retryBar}>
           <span className={styles.retryText}>
-            {retryableErrors.length} error{retryableErrors.length !== 1 ? "s" : ""} can be retried
+            {retryableCount} failed symbol{retryableCount !== 1 ? "s" : ""} can be retried
           </span>
           <button
             onClick={handleRetry}
-            disabled={state.retryingSymbol !== null}
-            className={`${styles.retryButton}${state.retryingSymbol !== null ? ` ${styles.retryButtonDisabled}` : ""}`}
+            disabled={state.retrying}
+            className={`${styles.retryButton}${state.retrying ? ` ${styles.retryButtonDisabled}` : ""}`}
           >
-            {state.retryingSymbol !== null ? "Retrying..." : "Retry failed symbols"}
+            {state.retrying ? "Retrying..." : `Retry ${retryableCount} symbol${retryableCount !== 1 ? "s" : ""}`}
           </button>
         </div>
       )}

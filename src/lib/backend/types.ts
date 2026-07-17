@@ -39,6 +39,7 @@ export interface BackendClient {
 
   scans: {
     start(request: StartScanRequest): Promise<string>;
+    retry(runId: string): Promise<string>;
     listRuns(limit?: number): Promise<ScanRunSummary[]>;
     getRun(runId: string): Promise<ScanRunDetail>;
     getResults(

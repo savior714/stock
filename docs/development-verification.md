@@ -58,6 +58,8 @@ npm run tauri:dev
 - **전체 성공**: 모든 symbol이 성공, `succeededSymbols == totalSymbols`
 - **부분 실패**: GOOGL은 retryable error, AMD는 permanent error, 나머지는 성공
 - **느린 실행**: symbol당 200ms 지연, Cancel 가능
+- **Retry**: 완료/실패 run에서 retryable symbol만 재실행. 원본 watchlist/preset 스냅샷 기반. resource 삭제 후에도 retry 가능.
+- **Snapshot 보존**: Mock run detail에 `presetSnapshotJson`, `symbolsSnapshotJson`, `retryOfRunId` 보존. 선택 watchlist symbol만 실행.
 
 ### Mock 데이터 초기화
 
@@ -66,7 +68,7 @@ npm run tauri:dev
 # (개발 모드에서만 동작)
 ```
 
-또는 `localStorage`의 `stock.mock.backend.v1` 키를 수동 삭제.
+또는 `localStorage`의 `stock.mock.backend.v2` 키를 수동 삭제.
 
 ## 검증 경계
 

@@ -336,8 +336,6 @@ export default function Home() {
           selectedRun ? (
             <ScanLogsPanel
               runId={selectedRun.id}
-              presetId={selectedRun.presetId}
-              watchlistId={selectedRun.watchlistId}
               onRetry={handleRetry}
             />
           ) : (

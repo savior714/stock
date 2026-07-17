@@ -23,10 +23,10 @@ import type {
 
 import { INITIAL_WATCHLISTS, INITIAL_PRESETS } from "./mock-fixtures";
 
-const STORAGE_KEY = "stock.mock.backend.v1";
+const STORAGE_KEY = "stock.mock.backend.v2";
 
 interface StoredState {
-  version: 1;
+  version: 2;
   watchlists: WatchlistSummary[];
   watchlistDetails: Record<string, Omit<WatchlistDetail, "id">>;
   presets: ScanPresetSummary[];
@@ -42,7 +42,7 @@ interface StoredState {
 
 function createInitialState(): StoredState {
   return {
-    version: 1,
+    version: 2,
     watchlists: INITIAL_WATCHLISTS,
     watchlistDetails: Object.fromEntries(
       INITIAL_WATCHLISTS.map((wl) => [wl.id, {
@@ -73,7 +73,7 @@ function loadState(): StoredState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createInitialState();
     const parsed = JSON.parse(raw) as StoredState;
-    if (parsed.version !== 1) return createInitialState();
+    if (parsed.version !== 2) return createInitialState();
     return parsed;
   } catch {
     return createInitialState();
@@ -159,7 +159,7 @@ export function createMockStore(): MockStore {
     getRunDetail(runId: string): ScanRunDetail | undefined {
       const base = state.runDetails[runId];
       if (!base) return undefined;
-      return { id: runId, ...base, presetSnapshotJson: {}, symbolsSnapshotJson: [], retryOfRunId: null };
+      return { id: runId, ...base };
     },
 
     getResults(runId: string): ScanResult[] {
@@ -273,12 +273,13 @@ export function createMockStore(): MockStore {
       const now = new Date().toISOString();
       const runId = `mock-run-${state.nextRunId++}`;
       const watchlist = state.watchlists.find((w) => w.id === request.watchlistId);
+      const totalSymbols = extra.totalSymbols ?? watchlist?.symbolCount ?? 0;
       const summary: ScanRunSummary = {
         id: runId,
         watchlistId: request.watchlistId,
         presetId: request.presetId,
         status,
-        totalSymbols: watchlist?.symbolCount ?? 0,
+        totalSymbols,
         succeededSymbols: 0,
         failedSymbols: 0,
         startedAt: status === "running" || status === "completed" || status === "cancelled" || status === "failed" ? now : null,
@@ -290,14 +291,14 @@ export function createMockStore(): MockStore {
         presetId: request.presetId,
         status,
         baseTradeDate: null,
-        totalSymbols: summary.totalSymbols,
+        totalSymbols,
         succeededSymbols: 0,
         failedSymbols: 0,
         startedAt: summary.startedAt,
         finishedAt: summary.finishedAt,
-        presetSnapshotJson: {},
-        symbolsSnapshotJson: [],
-        retryOfRunId: null,
+        presetSnapshotJson: extra.presetSnapshotJson ?? {},
+        symbolsSnapshotJson: extra.symbolsSnapshotJson ?? [],
+        retryOfRunId: extra.retryOfRunId ?? null,
         ...extra,
       };
       persist();

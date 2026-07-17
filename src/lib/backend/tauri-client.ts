@@ -78,6 +78,9 @@ class TauriBackendClient implements BackendClient {
         },
       }),
 
+    retry: (runId: string): Promise<string> =>
+      invoke<string>("retry_scan", { runId }),
+
     listRuns: (limit?: number): Promise<ScanRunSummary[]> =>
       invoke<ScanRunSummary[]>("list_scan_runs", { limit }),
 

@@ -12,6 +12,10 @@ export async function startScan(request: StartScanRequest): Promise<string> {
   return getBackendClient().scans.start(request);
 }
 
+export async function retryScan(runId: string): Promise<string> {
+  return getBackendClient().scans.retry(runId);
+}
+
 export async function listScanRuns(limit?: number): Promise<ScanRunSummary[]> {
   return getBackendClient().scans.listRuns(limit);
 }

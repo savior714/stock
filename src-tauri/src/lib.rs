@@ -13,7 +13,8 @@ use commands::scan_presets::{
     create_scan_preset, delete_scan_preset, get_scan_preset, list_scan_presets, update_scan_preset,
 };
 use commands::scans::{
-    cancel_scan, get_scan_errors, get_scan_results, get_scan_run, list_scan_runs, start_scan,
+    cancel_scan, get_scan_errors, get_scan_results, get_scan_run, list_scan_runs, retry_scan,
+    start_scan,
 };
 use commands::watchlists::{
     create_watchlist, delete_watchlist, get_watchlist, list_watchlists, update_watchlist,
@@ -53,7 +54,8 @@ pub fn run() {
             get_scan_run,
             get_scan_results,
             get_scan_errors,
-            cancel_scan
+            cancel_scan,
+            retry_scan
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

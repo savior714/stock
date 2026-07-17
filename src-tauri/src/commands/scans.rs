@@ -11,6 +11,7 @@ use crate::provider::yahoo::YahooMarketDataProvider;
 use crate::repository::scan_preset::ScanConditionDetail;
 use crate::state::{AppState, CancellationRegistry};
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -91,6 +92,7 @@ pub struct ScanErrorDto {
 // Helpers
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 struct PreparedScan {
     run_id: ScanRunId,
     preset_id: ScanPresetId,
@@ -472,10 +474,236 @@ pub async fn cancel_scan(state: tauri::State<'_, AppState>, run_id: String) -> A
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Retry — snapshot-based symbol retry
+// ---------------------------------------------------------------------------
+
+/// Prepare a retry scan from an existing run's snapshot data.
+/// Does not create or start a new run; returns the prepared inputs only.
+fn prepare_retry_scan(
+    database: &mut Database,
+    original_run_id: &ScanRunId,
+) -> AppResult<PreparedScan> {
+    let repo = crate::repository::scan_run::ScanRunRepository::new(database);
+    let original = repo.get(original_run_id)?;
+
+    // Only completed/failed runs can be retried
+    if original.status != ScanRunStatus::Completed && original.status != ScanRunStatus::Failed {
+        return Err(AppError::validation(format!(
+            "scan run {} is in {} state and cannot be retried",
+            original_run_id.0,
+            match original.status {
+                ScanRunStatus::Pending => "pending",
+                ScanRunStatus::Running => "running",
+                ScanRunStatus::Completed => "completed",
+                ScanRunStatus::Cancelled => "cancelled",
+                ScanRunStatus::Failed => "failed",
+            }
+        )));
+    }
+
+    // Deserialize preset snapshot
+    let preset: ScanPreset = serde_json::from_value(original.preset_snapshot_json.clone())
+        .map_err(|error| {
+            AppError::internal(
+                "failed to deserialize preset snapshot JSON",
+                error.to_string(),
+            )
+        })?;
+
+    // Validate preset has at least one enabled condition
+    if !preset.conditions.iter().any(|c| c.enabled) {
+        return Err(AppError::validation(
+            "preset snapshot has no enabled conditions",
+        ));
+    }
+
+    // Deserialize symbol snapshot
+    let symbols: Vec<Symbol> = serde_json::from_value(original.symbols_snapshot_json.clone())
+        .map_err(|error| {
+            AppError::internal(
+                "failed to deserialize symbols snapshot JSON",
+                error.to_string(),
+            )
+        })?;
+
+    if symbols.is_empty() {
+        return Err(AppError::validation(
+            "symbols snapshot is empty — cannot retry",
+        ));
+    }
+
+    // Build a set of original symbols for intersection
+    let original_symbols: Vec<Symbol> = symbols.clone();
+    let original_symbol_names: Vec<&str> = original_symbols.iter().map(|s| s.as_str()).collect();
+
+    // Get retryable symbols (distinct, non-null, retryable=true)
+    let error_repo = crate::repository::scan_error::ScanErrorRepository::new(database);
+    let retryable_raw = error_repo.get_retryable_symbols(original_run_id)?;
+
+    // Intersect with original symbols, preserving original order
+    let retryable_set: HashSet<&str> = retryable_raw.iter().map(|s| s.as_str()).collect();
+    let mut retry_symbols: Vec<Symbol> = symbols
+        .into_iter()
+        .filter(|s| retryable_set.contains(s.as_str()))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Re-sort to match original snapshot order
+    retry_symbols.sort_by(|a, b| {
+        let oa = original_symbol_names.iter().position(|s| *s == a.as_str());
+        let ob = original_symbol_names.iter().position(|s| *s == b.as_str());
+        oa.cmp(&ob)
+    });
+
+    if retry_symbols.is_empty() {
+        return Err(AppError::validation(
+            "no retryable symbol errors found for this run",
+        ));
+    }
+
+    // The preset snapshot already contains SignalCondition objects.
+    // Convert them directly (they were serialized from the same type).
+    let conditions: Vec<SignalCondition> = preset
+        .conditions
+        .clone()
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut condition)| {
+            condition.sort_order = index as i64;
+            condition
+        })
+        .collect();
+
+    // Serialize snapshots for the new run
+    let preset_snapshot = serde_json::to_string(&preset).map_err(|error| {
+        AppError::internal("failed to serialize preset snapshot", error.to_string())
+    })?;
+    let symbols_snapshot = serde_json::to_string(&retry_symbols).map_err(|error| {
+        AppError::internal(
+            "failed to serialize retry symbol snapshot",
+            error.to_string(),
+        )
+    })?;
+
+    let input = crate::repository::scan_run::ScanRunCreate {
+        watchlist_id: original.watchlist_id.clone(),
+        preset_id: original.preset_id.clone(),
+        total_symbols: retry_symbols.len() as u32,
+        preset_snapshot_json: preset_snapshot,
+        symbols_snapshot_json: symbols_snapshot,
+        retry_of_run_id: Some(original_run_id.clone()),
+    };
+
+    let mut run_repo = crate::repository::scan_run::ScanRunRepository::new(database);
+    let summary = run_repo.create_pending(&input)?;
+
+    Ok(PreparedScan {
+        run_id: summary.id,
+        preset_id: preset.id,
+        symbols: retry_symbols,
+        conditions,
+    })
+}
+
+/// Launch a prepared scan: register cancellation, transition to running, spawn background task.
+async fn launch_prepared_scan(
+    state: tauri::State<'_, AppState>,
+    prepared: PreparedScan,
+) -> AppResult<String> {
+    let run_id = prepared.run_id.clone();
+
+    // Register cancellation before exposing the run as running.
+    state.cancellation_registry().register(&run_id).await;
+    let cancellation = state
+        .cancellation_registry()
+        .get(&run_id)
+        .await
+        .ok_or_else(|| {
+            AppError::internal("failed to register scan cancellation", run_id.0.clone())
+        })?;
+
+    if let Err(error) = state.with_database(|database| {
+        let mut repository = crate::repository::scan_run::ScanRunRepository::new(database);
+        repository.start_running(&run_id)
+    }) {
+        state.cancellation_registry().remove(&run_id).await;
+        return Err(error);
+    }
+
+    let response_run_id = run_id.0.clone();
+    let app_state_for_task = AppState::clone(state.inner());
+    let cancellation_registry = Arc::clone(state.cancellation_registry());
+
+    tauri::async_runtime::spawn(async move {
+        let task_run_id = prepared.run_id.clone();
+        let _guard = CancelGuard {
+            run_id: task_run_id.clone(),
+            registry: Arc::clone(&cancellation_registry),
+        };
+        let provider = RetryConcurrentProvider::new(YahooMarketDataProvider::new());
+        let service = crate::application::ScanService::new(
+            provider,
+            Arc::new(Mutex::new(cancellation)),
+            cancellation_registry,
+        );
+        let mut database = SharedDatabaseOps::new(app_state_for_task);
+
+        let result = execute_prepared_scan(
+            &service,
+            task_run_id.clone(),
+            prepared.preset_id,
+            prepared.symbols,
+            prepared.conditions,
+            &mut database,
+        )
+        .await;
+
+        if let Err(error) = result {
+            let run_error = ScanError {
+                run_id: task_run_id.clone(),
+                symbol: None,
+                code: format!("{:?}", error.code),
+                message: error.message,
+                detail: error.detail,
+                retryable: error.retryable,
+                attempt: 1,
+            };
+            if let Err(save_error) = database.save_scan_error(&run_error) {
+                eprintln!(
+                    "Failed to save scan error for run {}: {}",
+                    task_run_id.0, save_error
+                );
+            }
+            if let Err(mark_error) = database.mark_scan_failed(&task_run_id) {
+                eprintln!(
+                    "Failed to mark scan run {} as failed: {}",
+                    task_run_id.0, mark_error
+                );
+            }
+        }
+    });
+
+    Ok(response_run_id)
+}
+
+/// Retry failed symbols from a completed/failed scan run.
+/// Uses the original run's snapshot data, not live Watchlist/Preset resources.
+#[tauri::command]
+pub async fn retry_scan(state: tauri::State<'_, AppState>, run_id: String) -> AppResult<String> {
+    let scan_run_id = ScanRunId::new(&run_id)?;
+
+    let prepared = state.with_database(|database| prepare_retry_scan(database, &scan_run_id))?;
+
+    launch_prepared_scan(state, prepared).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::TriggerMode;
+    use crate::error::AppErrorCode;
 
     fn bollinger_detail(side: SignalSide, multiplier: f64) -> ScanConditionDetail {
         ScanConditionDetail {
@@ -511,5 +739,265 @@ mod tests {
         assert_ne!(lower.id, upper.id);
         assert!(lower.id.0.ends_with(":bollinger:lower"));
         assert!(upper.id.0.ends_with(":bollinger:upper"));
+    }
+
+    // ------------------------------------------------------------------
+    // Retry helper tests
+    // ------------------------------------------------------------------
+
+    fn make_retry_db() -> (Database, ScanRunId) {
+        let db = Database::open_in_memory().expect("db must init");
+        let conn = db.connection();
+
+        conn.execute(
+            "INSERT INTO watchlists (id, name) VALUES ('wl-retry', 'Retry WL')",
+            [],
+        )
+        .expect("watchlist must insert");
+        conn.execute(
+            "INSERT INTO scan_presets (id, name, trigger_mode) VALUES ('ps-retry', 'Retry PS', 'current')",
+            [],
+        ).expect("preset must insert");
+        conn.execute(
+            "INSERT INTO instruments (symbol, provider_symbol, asset_type) VALUES ('AAPL', 'AAPL', 'stock')",
+            [],
+        ).ok();
+        conn.execute(
+            "INSERT INTO instruments (symbol, provider_symbol, asset_type) VALUES ('MSFT', 'MSFT', 'stock')",
+            [],
+        ).ok();
+        conn.execute(
+            "INSERT INTO instruments (symbol, provider_symbol, asset_type) VALUES ('GOOGL', 'GOOGL', 'stock')",
+            [],
+        ).ok();
+        conn.execute(
+            "INSERT INTO instruments (symbol, provider_symbol, asset_type) VALUES ('AMZN', 'AMZN', 'stock')",
+            [],
+        ).ok();
+
+        let run_id = ScanRunId::new("run-retry-1").expect("valid id");
+        let preset_with_condition = serde_json::json!({
+            "id": "ps-retry",
+            "name": "Retry",
+            "conditions": [{
+                "id": "rsi:lower",
+                "indicator": "rsi",
+                "side": "lower",
+                "period": 14,
+                "threshold": 30.0,
+                "parameters": {},
+                "triggerMode": "current",
+                "enabled": true,
+                "sortOrder": 0
+            }]
+        });
+        conn.execute(
+            "INSERT INTO scan_runs (id, watchlist_id, preset_id, status, total_symbols, \
+             preset_snapshot_json, symbols_snapshot_json) \
+             VALUES (?, 'wl-retry', 'ps-retry', 'completed', 4, ?, \
+             '[\"AAPL\",\"MSFT\",\"GOOGL\",\"AMZN\"]')",
+            [
+                &run_id.0,
+                &serde_json::to_string(&preset_with_condition).unwrap(),
+            ],
+        )
+        .expect("run must insert");
+
+        (db, run_id)
+    }
+
+    #[test]
+    fn extracts_retryable_symbols_only() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection_mut();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'MSFT', 'DATA_NOT_FOUND', 'permanent', 0)",
+            [],
+        )
+        .ok();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'GOOGL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        let symbols: Vec<&str> = prepared.symbols.iter().map(|s| s.as_str()).collect();
+        assert_eq!(symbols, vec!["AAPL", "GOOGL"]);
+    }
+
+    #[test]
+    fn excludes_null_symbol_errors() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection_mut();
+        // Run-level error (null symbol) should not be a retry target
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', NULL, 'GLOBAL_ERR', 'global', 1)",
+            [],
+        )
+        .ok();
+
+        let err = prepare_retry_scan(&mut db, &run_id).unwrap_err();
+        assert_eq!(err.code, AppErrorCode::Validation);
+    }
+
+    #[test]
+    fn returns_validation_when_no_retryable_symbols() {
+        let (mut db, run_id) = make_retry_db();
+        // Only permanent errors
+        let conn = db.connection_mut();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'DATA_NOT_FOUND', 'permanent', 0)",
+            [],
+        )
+        .ok();
+
+        let err = prepare_retry_scan(&mut db, &run_id).unwrap_err();
+        assert_eq!(err.code, AppErrorCode::Validation);
+    }
+
+    #[test]
+    fn preserves_original_symbol_order() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection_mut();
+        // Add retryable errors in reverse order
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AMZN', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'GOOGL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        let symbols: Vec<&str> = prepared.symbols.iter().map(|s| s.as_str()).collect();
+        // Should preserve original order: GOOGL before AMZN
+        assert_eq!(symbols, vec!["GOOGL", "AMZN"]);
+    }
+
+    #[test]
+    fn deduplicates_retryable_symbols() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection_mut();
+        // Multiple errors for same symbol
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'ERR1', 'retryable', 1)",
+            [],
+        )
+        .ok();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'ERR2', 'retryable', 1)",
+            [],
+        )
+        .ok();
+
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        let symbols: Vec<&str> = prepared.symbols.iter().map(|s| s.as_str()).collect();
+        assert_eq!(symbols, vec!["AAPL"]);
+    }
+
+    #[test]
+    fn excludes_symbols_not_in_original_snapshot() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection_mut();
+        // Error for a symbol not in the original snapshot
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'TSLA', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+        // Also add a retryable error for an original symbol
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        let symbols: Vec<&str> = prepared.symbols.iter().map(|s| s.as_str()).collect();
+        // TSLA should be excluded (not in original snapshot)
+        assert!(!symbols.contains(&"TSLA"));
+        // AAPL should be included (in original snapshot)
+        assert!(symbols.contains(&"AAPL"));
+    }
+
+    #[test]
+    fn rejects_non_terminal_status() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection_mut();
+        conn.execute(
+            "UPDATE scan_runs SET status = 'pending' WHERE id = 'run-retry-1'",
+            [],
+        )
+        .expect("must update");
+
+        let err = prepare_retry_scan(&mut db, &run_id).unwrap_err();
+        assert_eq!(err.code, AppErrorCode::Validation);
+    }
+
+    #[test]
+    fn saves_retry_of_run_id() {
+        let (mut db, run_id) = make_retry_db();
+        db.connection()
+            .execute(
+                "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'NETWORK_RETRY', 'retryable', 1)",
+                [],
+            )
+            .ok();
+
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        let new_run_id = prepared.run_id.0.clone();
+
+        // Verify the new run has retry_of_run_id set
+        let child: Option<String> = db
+            .connection()
+            .query_row(
+                "SELECT retry_of_run_id FROM scan_runs WHERE id = ?",
+                [&new_run_id],
+                |row| row.get(0),
+            )
+            .ok();
+        assert_eq!(child, Some(run_id.0));
+    }
+
+    #[test]
+    fn total_symbols_matches_retry_subset() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'GOOGL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        assert_eq!(prepared.symbols.len(), 2);
     }
 }

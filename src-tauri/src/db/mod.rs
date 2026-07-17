@@ -9,7 +9,9 @@ const CONDITION_TRIGGER_MODE_MIGRATION: &str =
 const SCAN_RUN_SNAPSHOTS_MIGRATION: &str =
     include_str!("../../migrations/0003_scan_run_snapshots.sql");
 const LEGACY_IMPORT_MIGRATION: &str = include_str!("../../migrations/0004_legacy_import.sql");
-const LATEST_SCHEMA_VERSION: i64 = 4;
+const HISTORICAL_RESOURCES_MIGRATION: &str =
+    include_str!("../../migrations/0005_scan_run_historical_resources.sql");
+const LATEST_SCHEMA_VERSION: i64 = 5;
 
 pub struct Database {
     connection: Connection,
@@ -124,6 +126,18 @@ impl Database {
                 .map_err(|error| {
                     AppError::database("failed to apply legacy import migration", error.to_string())
                 })?;
+            current_version = 4;
+        }
+
+        if current_version == 4 {
+            connection
+                .execute_batch(HISTORICAL_RESOURCES_MIGRATION)
+                .map_err(|error| {
+                    AppError::database(
+                        "failed to apply scan run historical resources migration",
+                        error.to_string(),
+                    )
+                })?;
         }
 
         Ok(Self { connection })
@@ -195,7 +209,7 @@ mod tests {
             get_column_name(database.connection(), "scan_runs", "symbols_snapshot_json")
                 .expect("symbols_snapshot_json column must exist");
 
-        assert_eq!(database.schema_version().expect("version must exist"), 4);
+        assert_eq!(database.schema_version().expect("version must exist"), 5);
         assert_eq!(foreign_keys, 1);
         assert_eq!(watchlists_table, "watchlists");
 
@@ -261,7 +275,7 @@ mod tests {
         let retry_of_col = get_column_name(database.connection(), "scan_runs", "retry_of_run_id")
             .expect("retry_of_run_id column must exist after v1->v2->v3->v4");
 
-        assert_eq!(database.schema_version().expect("version must exist"), 4);
+        assert_eq!(database.schema_version().expect("version must exist"), 5);
         assert_eq!(trigger_mode, "cross");
         assert_eq!(retry_of_col, "retry_of_run_id");
     }
@@ -291,10 +305,11 @@ mod tests {
             )
             .expect("preset must insert");
 
-        let database = Database::initialize(connection).expect("database must migrate v2->v3->v4");
+        let database =
+            Database::initialize(connection).expect("database must migrate v2->v3->v4->v5");
 
-        // Verify version reached 4
-        assert_eq!(database.schema_version().expect("version must exist"), 4);
+        // Verify version reached 5
+        assert_eq!(database.schema_version().expect("version must exist"), 5);
 
         // Verify existing data preserved
         let watchlist_name: String = database
@@ -349,5 +364,270 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn initializes_latest_schema_version_five() {
+        let database = Database::open_in_memory().expect("database must initialize");
+        assert_eq!(database.schema_version().expect("version must exist"), 5);
+    }
+
+    #[test]
+    fn migrates_v4_to_v5_preserving_data() {
+        // Build a v4 database manually
+        let connection = Connection::open_in_memory().expect("database must open");
+        connection
+            .execute_batch(INITIAL_MIGRATION)
+            .expect("v1 migration must apply");
+        connection
+            .execute_batch(CONDITION_TRIGGER_MODE_MIGRATION)
+            .expect("v2 migration must apply");
+        connection
+            .execute_batch(SCAN_RUN_SNAPSHOTS_MIGRATION)
+            .expect("v3 migration must apply");
+        connection
+            .execute_batch(LEGACY_IMPORT_MIGRATION)
+            .expect("v4 migration must apply");
+
+        // Insert data to verify preservation
+        let conn = &connection;
+        conn.execute(
+            "INSERT INTO watchlists (id, name) VALUES ('wl-mig', 'Migrate Watchlist')",
+            [],
+        )
+        .expect("watchlist must insert");
+        conn.execute(
+            "INSERT INTO scan_presets (id, name, trigger_mode) VALUES ('ps-mig', 'Migrate Preset', 'current')",
+            [],
+        ).expect("preset must insert");
+        conn.execute(
+            "INSERT INTO instruments (symbol, provider_symbol, asset_type) VALUES ('AAPL', 'AAPL', 'stock')",
+            [],
+        ).ok();
+        conn.execute(
+            "INSERT INTO instruments (symbol, provider_symbol, asset_type) VALUES ('MSFT', 'MSFT', 'stock')",
+            [],
+        ).ok();
+
+        // Create a scan run with snapshots
+        conn.execute(
+            "INSERT INTO scan_runs (id, watchlist_id, preset_id, status, total_symbols, \
+             preset_snapshot_json, symbols_snapshot_json, retry_of_run_id) \
+             VALUES ('run-mig-1', 'wl-mig', 'ps-mig', 'completed', 2, \
+             '{\"name\":\"Test\"}', '[\"AAPL\",\"MSFT\"]', NULL)",
+            [],
+        )
+        .expect("scan run must insert");
+
+        // Create a child retry run
+        conn.execute(
+            "INSERT INTO scan_runs (id, watchlist_id, preset_id, status, total_symbols, \
+             preset_snapshot_json, symbols_snapshot_json, retry_of_run_id) \
+             VALUES ('run-mig-2', 'wl-mig', 'ps-mig', 'pending', 1, \
+             '{\"name\":\"Retry\"}', '[\"AAPL\"]', 'run-mig-1')",
+            [],
+        )
+        .expect("retry run must insert");
+
+        // Create scan results and errors
+        conn.execute(
+            "INSERT INTO scan_results (run_id, symbol, trade_date, current_price, \
+             all_conditions_matched, any_condition_matched) \
+             VALUES ('run-mig-1', 'AAPL', '2026-07-15', 150.0, 1, 1)",
+            [],
+        )
+        .expect("scan result must insert");
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-mig-1', 'MSFT', 'NETWORK_RETRY', 'retryable error', 1)",
+            [],
+        )
+        .expect("scan error must insert");
+
+        // Now migrate to v5
+        let database = Database::initialize(connection).expect("v4->v5 migration must succeed");
+
+        // Verify version reached 5
+        assert_eq!(database.schema_version().expect("version must exist"), 5);
+
+        // Verify ScanRun data preserved
+        let run: (String, String, String, String) = database
+            .connection()
+            .query_row(
+                "SELECT id, watchlist_id, preset_id, status FROM scan_runs WHERE id = 'run-mig-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("run must exist");
+        assert_eq!(run.0, "run-mig-1");
+        assert_eq!(run.1, "wl-mig");
+        assert_eq!(run.2, "ps-mig");
+        assert_eq!(run.3, "completed");
+
+        // Verify snapshot JSON preserved
+        let preset_snap: String = database
+            .connection()
+            .query_row(
+                "SELECT preset_snapshot_json FROM scan_runs WHERE id = 'run-mig-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("preset snapshot must exist");
+        assert_eq!(preset_snap, "{\"name\":\"Test\"}");
+
+        let symbols_snap: String = database
+            .connection()
+            .query_row(
+                "SELECT symbols_snapshot_json FROM scan_runs WHERE id = 'run-mig-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("symbols snapshot must exist");
+        assert_eq!(symbols_snap, "[\"AAPL\",\"MSFT\"]");
+
+        // Verify retry_of_run_id preserved
+        let retry_run: String = database
+            .connection()
+            .query_row(
+                "SELECT retry_of_run_id FROM scan_runs WHERE id = 'run-mig-2'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("retry run must exist");
+        assert_eq!(retry_run, "run-mig-1");
+
+        // Verify ScanResults preserved
+        let result_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM scan_results WHERE run_id = 'run-mig-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("result count must exist");
+        assert_eq!(result_count, 1);
+
+        // Verify ScanErrors preserved
+        let error_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM scan_errors WHERE run_id = 'run-mig-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("error count must exist");
+        assert_eq!(error_count, 1);
+    }
+
+    #[test]
+    fn allows_watchlist_and_preset_deletion_after_migration() {
+        let connection = Connection::open_in_memory().expect("database must open");
+        connection
+            .execute_batch(INITIAL_MIGRATION)
+            .expect("v1 migration must apply");
+        connection
+            .execute_batch(CONDITION_TRIGGER_MODE_MIGRATION)
+            .expect("v2 migration must apply");
+        connection
+            .execute_batch(SCAN_RUN_SNAPSHOTS_MIGRATION)
+            .expect("v3 migration must apply");
+        connection
+            .execute_batch(LEGACY_IMPORT_MIGRATION)
+            .expect("v4 migration must apply");
+        connection
+            .execute_batch(HISTORICAL_RESOURCES_MIGRATION)
+            .expect("v4->v5 migration must apply");
+
+        let conn = &connection;
+        conn.execute(
+            "INSERT INTO watchlists (id, name) VALUES ('wl-del', 'Delete Me')",
+            [],
+        )
+        .expect("watchlist must insert");
+        conn.execute(
+            "INSERT INTO scan_presets (id, name, trigger_mode) VALUES ('ps-del', 'Delete Me Preset', 'current')",
+            [],
+        ).expect("preset must insert");
+        conn.execute(
+            "INSERT INTO scan_runs (id, watchlist_id, preset_id, status, total_symbols, \
+             preset_snapshot_json, symbols_snapshot_json) \
+             VALUES ('run-del', 'wl-del', 'ps-del', 'completed', 1, '{}', '[]')",
+            [],
+        )
+        .expect("run must insert");
+
+        // Delete watchlist and preset (no FK constraint to block this)
+        conn.execute("DELETE FROM watchlists WHERE id = 'wl-del'", [])
+            .expect("watchlist delete must succeed");
+        conn.execute("DELETE FROM scan_presets WHERE id = 'ps-del'", [])
+            .expect("preset delete must succeed");
+
+        // Run should still be queryable
+        let run: String = conn
+            .query_row("SELECT id FROM scan_runs WHERE id = 'run-del'", [], |row| {
+                row.get(0)
+            })
+            .expect("run must still exist after resource deletion");
+        assert_eq!(run, "run-del");
+    }
+
+    #[test]
+    fn foreign_key_enforcement_reenabled_after_migration() {
+        let connection = Connection::open_in_memory().expect("database must open");
+        connection
+            .execute_batch(INITIAL_MIGRATION)
+            .expect("v1 migration must apply");
+        connection
+            .execute_batch(CONDITION_TRIGGER_MODE_MIGRATION)
+            .expect("v2 migration must apply");
+        connection
+            .execute_batch(SCAN_RUN_SNAPSHOTS_MIGRATION)
+            .expect("v3 migration must apply");
+        connection
+            .execute_batch(LEGACY_IMPORT_MIGRATION)
+            .expect("v4 migration must apply");
+        connection
+            .execute_batch(HISTORICAL_RESOURCES_MIGRATION)
+            .expect("v4->v5 migration must apply");
+
+        // Verify foreign keys are enforced
+        let fk: i64 = connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign_keys pragma must be readable");
+        assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn foreign_key_check_clean_after_migration() {
+        let connection = Connection::open_in_memory().expect("database must open");
+        connection
+            .execute_batch(INITIAL_MIGRATION)
+            .expect("v1 migration must apply");
+        connection
+            .execute_batch(CONDITION_TRIGGER_MODE_MIGRATION)
+            .expect("v2 migration must apply");
+        connection
+            .execute_batch(SCAN_RUN_SNAPSHOTS_MIGRATION)
+            .expect("v3 migration must apply");
+        connection
+            .execute_batch(LEGACY_IMPORT_MIGRATION)
+            .expect("v4 migration must apply");
+        connection
+            .execute_batch(HISTORICAL_RESOURCES_MIGRATION)
+            .expect("v4->v5 migration must apply");
+
+        // PRAGMA foreign_key_check should return no rows (clean)
+        let mut stmt = connection
+            .prepare("PRAGMA foreign_key_check")
+            .expect("foreign_key_check must prepare");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("foreign_key_check must run");
+        let orphans: Vec<String> = rows.map(|r| r.expect("row must be readable")).collect();
+        assert!(
+            orphans.is_empty(),
+            "no foreign key violations expected, found: {:?}",
+            orphans
+        );
     }
 }

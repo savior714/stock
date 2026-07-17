@@ -135,12 +135,71 @@ class MockBackendClient implements BackendClient {
   scans = {
     start: async (request: StartScanRequest): Promise<string> => {
       await delay(30);
-      const runSummary = this.store.createRun(request, "pending");
+
+      // Get watchlist symbols for this run (not fixture symbols)
+      const watchlistDetail = this.store.getWatchlistDetail(request.watchlistId);
+      const symbols = watchlistDetail ? watchlistDetail.symbols : [];
+      const presetDetail = this.store.getPresetDetail(request.presetId);
+      const presetSnapshot = presetDetail ? JSON.stringify(presetDetail) : "{}";
+      const symbolsSnapshot = JSON.stringify(symbols);
+
+      const runSummary = this.store.createRun(
+        request,
+        "pending",
+        {
+          presetSnapshotJson: JSON.parse(presetSnapshot),
+          symbolsSnapshotJson: JSON.parse(symbolsSnapshot),
+          retryOfRunId: null,
+        },
+      );
       const runId = runSummary.id;
 
       const presetId = request.presetId;
-      const resultsData = FIXED_RESULTS[presetId];
-      const symbols = resultsData ? Object.keys(resultsData) : [];
+      const fixtureData = FIXED_RESULTS[presetId];
+      // Build resultsData only for watchlist symbols, with defaults for missing fixtures
+      const resultsData: Record<string, { success: boolean; result: ScanResult | null; error: ScanError | null }> = {};
+      const tradeDate = "2025-07-17";
+      for (const sym of symbols) {
+        const fixture = fixtureData?.[sym];
+        if (fixture) {
+          resultsData[sym] = {
+            success: fixture.success,
+            result: fixture.result as ScanResult | null,
+            error: fixture.error as ScanError | null,
+          };
+        } else {
+          // Default: success with deterministic data based on symbol hash
+          const hash = sym.charCodeAt(0) % 3;
+          resultsData[sym] = {
+            success: hash !== 2,
+            result: hash !== 2
+              ? {
+                  symbol: sym,
+                  tradeDate,
+                  currentPrice: 100 + hash * 50,
+                  rsi: 30 + hash * 10,
+                  mfi: 25 + hash * 8,
+                  bollingerLower: 90 + hash * 10,
+                  bollingerMiddle: 100 + hash * 12,
+                  bollingerUpper: 110 + hash * 14,
+                  allConditionsMatched: hash % 2 === 0,
+                  anyConditionMatched: true,
+                  dataStale: false,
+                }
+              : null,
+            error: hash === 2
+              ? {
+                  symbol: sym,
+                  code: "NETWORK_RETRY",
+                  message: "Yahoo Finance API retry limit exceeded",
+                  detail: "temporary network error",
+                  retryable: true,
+                  attempt: 3,
+                }
+              : null,
+          };
+        }
+      }
       const delayMs = presetId === "preset-4" ? 200 : 80;
 
       this.activeScans.set(runId, {
@@ -156,10 +215,151 @@ class MockBackendClient implements BackendClient {
         cancelled: false,
       });
 
-      this.store.updateRun(runId, { status: "running" });
+      this.store.updateRun(runId, {
+        status: "running",
+        totalSymbols: symbols.length,
+        presetSnapshotJson: JSON.parse(presetSnapshot),
+        symbolsSnapshotJson: JSON.parse(symbolsSnapshot),
+      });
       this.emitEvent(runId, "scan://started", { runId, sequence: 1 });
 
       return runId;
+    },
+
+    retry: async (runId: string): Promise<string> => {
+      await delay(30);
+
+      // Get original run detail
+      const originalDetail = this.store.getRunDetail(runId);
+      if (!originalDetail) throw new Error(`Run ${runId} not found`);
+
+      // Validate original run status
+      if (
+        originalDetail.status !== "completed" &&
+        originalDetail.status !== "failed"
+      ) {
+        throw new Error(
+          `Run ${runId} is in ${originalDetail.status} state and cannot be retried`,
+        );
+      }
+
+      // Get original errors and find retryable symbols
+      const originalErrors = this.store.getErrors(runId);
+      const retryableSet = new Set<string>();
+      for (const err of originalErrors) {
+        if (err.retryable && err.symbol !== null) {
+          retryableSet.add(err.symbol);
+        }
+      }
+
+      if (retryableSet.size === 0) {
+        throw new Error("No retryable symbol errors found for this run");
+      }
+
+      // Intersect with original symbols snapshot, preserving order
+      const originalSymbols = originalDetail.symbolsSnapshotJson as string[];
+      const retrySymbols = originalSymbols.filter(
+        (sym) => retryableSet.has(sym),
+      );
+      // Deduplicate while preserving order
+      const seen = new Set<string>();
+      const uniqueRetrySymbols = retrySymbols.filter((sym) => {
+        if (seen.has(sym)) return false;
+        seen.add(sym);
+        return true;
+      });
+
+      if (uniqueRetrySymbols.length === 0) {
+        throw new Error("No retryable symbol errors found for this run");
+      }
+
+      // Get preset snapshot from original run
+      const presetSnapshot = originalDetail.presetSnapshotJson;
+
+      // Create new retry run
+      const retryRequest: StartScanRequest = {
+        watchlistId: originalDetail.watchlistId,
+        presetId: originalDetail.presetId,
+      };
+      const retrySummary = this.store.createRun(retryRequest, "pending", {
+        presetSnapshotJson: presetSnapshot,
+        symbolsSnapshotJson: uniqueRetrySymbols,
+        retryOfRunId: runId,
+        totalSymbols: uniqueRetrySymbols.length,
+      });
+      const retryRunId = retrySummary.id;
+
+      // Build results data for retry symbols only
+      const presetId = originalDetail.presetId;
+      const fixtureData = FIXED_RESULTS[presetId];
+      const tradeDate = "2025-07-17";
+      const retryResultsData: Record<string, { success: boolean; result: ScanResult | null; error: ScanError | null }> = {};
+      for (const sym of uniqueRetrySymbols) {
+        const fixture = fixtureData?.[sym];
+        if (fixture) {
+          retryResultsData[sym] = {
+            success: fixture.success,
+            result: fixture.result as ScanResult | null,
+            error: fixture.error as ScanError | null,
+          };
+        } else {
+          const hash = sym.charCodeAt(0) % 3;
+          retryResultsData[sym] = {
+            success: hash !== 2,
+            result: hash !== 2
+              ? {
+                  symbol: sym,
+                  tradeDate,
+                  currentPrice: 100 + hash * 50,
+                  rsi: 30 + hash * 10,
+                  mfi: 25 + hash * 8,
+                  bollingerLower: 90 + hash * 10,
+                  bollingerMiddle: 100 + hash * 12,
+                  bollingerUpper: 110 + hash * 14,
+                  allConditionsMatched: hash % 2 === 0,
+                  anyConditionMatched: true,
+                  dataStale: false,
+                }
+              : null,
+            error: hash === 2
+              ? {
+                  symbol: sym,
+                  code: "NETWORK_RETRY",
+                  message: "Yahoo Finance API retry limit exceeded",
+                  detail: "temporary network error",
+                  retryable: true,
+                  attempt: 3,
+                }
+              : null,
+          };
+        }
+      }
+
+      const delayMs = presetId === "preset-4" ? 200 : 80;
+
+      this.activeScans.set(retryRunId, {
+        symbols: uniqueRetrySymbols,
+        resultsData: retryResultsData,
+        completed: 0,
+        succeeded: 0,
+        failed: 0,
+        seq: 2,
+        delayMs,
+        presetId,
+        runId: retryRunId,
+        cancelled: false,
+      });
+
+      this.store.updateRun(retryRunId, {
+        status: "running",
+        totalSymbols: uniqueRetrySymbols.length,
+      });
+      this.emitEvent(retryRunId, "scan://started", {
+        runId: retryRunId,
+        sequence: 1,
+      });
+
+      return retryRunId;
     },
 
     listRuns: async (limit?: number): Promise<ScanRunSummary[]> => {

@@ -14,16 +14,11 @@ const SORT_OPTIONS: { value: ResultSort["field"]; label: string }[] = [
   { value: "rsi", label: "RSI" },
   { value: "mfi", label: "MFI" },
   { value: "bollingerMiddle", label: "Bollinger Middle" },
-  { value: "matchedCount", label: "Matched count" },
 ];
 
 function formatNumber(value: number | null): string {
   if (value === null) return "\u2014";
   return value.toFixed(2);
-}
-
-function matchedCount(result: ScanResult): number {
-  return [result.allConditionsMatched, result.anyConditionMatched].filter(Boolean).length;
 }
 
 export default function ScanResultsTable({ results, runId, isLoading }: {
@@ -210,13 +205,6 @@ export default function ScanResultsTable({ results, runId, isLoading }: {
               <th
                 className={`${styles.th} ${styles.thCenter}`}
                 style={{ width: "60px" }}
-                onClick={() => handleSort("matchedCount")}
-              >
-                Matched {sortIndicator("matchedCount")}
-              </th>
-              <th
-                className={`${styles.th} ${styles.thCenter}`}
-                style={{ width: "60px" }}
               >
                 AND
               </th>
@@ -259,9 +247,6 @@ export default function ScanResultsTable({ results, runId, isLoading }: {
                 </td>
                 <td className={`${styles.cell} ${styles.cellRight}`}>
                   {formatNumber(row.bollingerUpper)}
-                </td>
-                <td className={`${styles.cell} ${styles.cellCenter}`}>
-                  {matchedCount(row)}
                 </td>
                 <td className={`${styles.cell} ${styles.cellCenter}`}>
                   <span

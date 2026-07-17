@@ -64,7 +64,7 @@
 - 구현과 검증이 끝난 변경은 별도 승인 요청 없이 커밋하고 `origin/main`에 직접 push한다.
 - pull request와 별도 작업 브랜치는 사용자가 해당 작업에서 명시적으로 요청한 경우에만 사용한다.
 - 원격 `main`이 앞서 있으면 먼저 동기화하고 fast-forward 가능한 상태에서 작업을 이어간다. 기존 기록을 덮어쓰기 위한 force push는 하지 않는다.
-- CI는 `main` push를 기준으로 실행한다.
+- 검증은 로컬 verify 명령으로 수행한다. GitHub Actions와 required CI는 사용하지 않는다.
 
 ## 세션 종료 및 자동 커밋 규칙
 
