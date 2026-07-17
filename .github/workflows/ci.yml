@@ -6,12 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   ci:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,20 +40,28 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Rust clippy
-        id: clippy
-        continue-on-error: true
+      - name: Apply integration-test Clippy fixes
+        run: cd src-tauri && cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features -- -D warnings
+
+      - name: Format Rust
+        run: cd src-tauri && cargo fmt
+
+      - name: Commit integration-test fixes
         run: |
-          cd src-tauri
-          cargo clippy --all-targets --all-features -- -D warnings > ../clippy.log 2>&1
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri
+          git commit -m "style: inline integration test format arguments"
+          git push origin HEAD:${GITHUB_HEAD_REF}
 
-      - name: Upload clippy log
-        if: steps.clippy.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-clippy-log
-          path: clippy.log
+      - name: Rust fmt
+        run: cd src-tauri && cargo fmt --check
 
-      - name: Fail on clippy error
-        if: steps.clippy.outcome == 'failure'
-        run: exit 1
+      - name: Rust clippy
+        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Rust test
+        run: cd src-tauri && cargo test
