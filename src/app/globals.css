@@ -73,30 +73,28 @@ select:focus-visible {
 
 /* ── Semantic tokens — dark override ── */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-app-background: #1a1c20;
-    --color-sidebar-background: #1e2025;
-    --color-surface: #24272e;
-    --color-surface-raised: #2a2d34;
-    --color-surface-hover: #32363e;
-    --color-text-primary: #e4e6eb;
-    --color-text-secondary: #a1a7b4;
-    --color-text-tertiary: #8f98aa;
-    --color-border: #353840;
-    --color-border-strong: #4a4e58;
-    --color-accent: #4d9fff;
-    --color-accent-hover: #66adff;
-    --color-accent-soft: #1a2d44;
-    --color-danger: #f28484;
-    --color-danger-soft: #3a1f21;
-    --color-success: #81c995;
-    --color-success-soft: #1b3326;
-    --color-warning: #ffb74d;
-    --color-focus-ring: #4d9fff;
-    --shadow-panel: 0 1px 3px rgb(0 0 0 / 20%), 0 1px 2px rgb(0 0 0 / 14%);
-    --shadow-drawer: 0 12px 40px rgb(0 0 0 / 40%), 0 4px 12px rgb(0 0 0 / 28%);
-  }
+:root[data-theme="dark"] {
+  --color-app-background: #1a1c20;
+  --color-sidebar-background: #1e2025;
+  --color-surface: #24272e;
+  --color-surface-raised: #2a2d34;
+  --color-surface-hover: #32363e;
+  --color-text-primary: #e4e6eb;
+  --color-text-secondary: #a1a7b4;
+  --color-text-tertiary: #8f98aa;
+  --color-border: #353840;
+  --color-border-strong: #4a4e58;
+  --color-accent: #4d9fff;
+  --color-accent-hover: #66adff;
+  --color-accent-soft: #1a2d44;
+  --color-danger: #f28484;
+  --color-danger-soft: #3a1f21;
+  --color-success: #81c995;
+  --color-success-soft: #1b3326;
+  --color-warning: #ffb74d;
+  --color-focus-ring: #4d9fff;
+  --shadow-panel: 0 1px 3px rgb(0 0 0 / 20%), 0 1px 2px rgb(0 0 0 / 14%);
+  --shadow-drawer: 0 12px 40px rgb(0 0 0 / 40%), 0 4px 12px rgb(0 0 0 / 28%);
 }
 
 /* ── App shell ── */

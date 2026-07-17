@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseThemeValue, reconcileSelectedId } from "./scanner-utils";
+import { resolveTheme } from "./theme";
 
 // ── reconcileSelectedId ──────────────────────────────────────────
 
@@ -62,5 +63,89 @@ describe("parseThemeValue", () => {
     expect(parseThemeValue("darkmode")).toBe("light");
     expect(parseThemeValue("Dark")).toBe("light");
     expect(parseThemeValue("  light  ")).toBe("light");
+  });
+});
+
+// ── resolveTheme ─────────────────────────────────────────────────
+
+describe("resolveTheme", () => {
+  it('light 모드일 때 light를 반환한다', () => {
+    expect(resolveTheme("light", null)).toBe("light");
+  });
+
+  it('dark 모드일 때 dark를 반환한다', () => {
+    expect(resolveTheme("dark", null)).toBe("dark");
+  });
+
+  it('system + dark media일 때 dark를 반환한다', () => {
+    const mql = { matches: true } as MediaQueryList;
+    expect(resolveTheme("system", mql)).toBe("dark");
+  });
+
+  it('system + light media일 때 light를 반환한다', () => {
+    const mql = { matches: false } as MediaQueryList;
+    expect(resolveTheme("system", mql)).toBe("light");
+  });
+
+  it('system + null media일 때 light를 반환한다', () => {
+    expect(resolveTheme("system", null)).toBe("light");
+  });
+});
+
+// ── canStart logic ───────────────────────────────────────────────
+
+describe("scan canStart logic", () => {
+  type Item = { id: string };
+
+  function computeCanStart(
+    selectedWatchlistId: string,
+    selectedPresetId: string,
+    watchlists: Item[],
+    presets: Item[],
+    isRunning: boolean,
+    isLoading: boolean,
+  ): boolean {
+    const watchlistExists = watchlists.some((w) => w.id === selectedWatchlistId);
+    const presetExists = presets.some((p) => p.id === selectedPresetId);
+    return !!(
+      selectedWatchlistId &&
+      selectedPresetId &&
+      watchlistExists &&
+      presetExists &&
+      !isRunning &&
+      !isLoading
+    );
+  }
+
+  it("Watchlist가 목록에 없으면 false", () => {
+    expect(computeCanStart("w1", "p1", [], [{ id: "p1" }], false, false)).toBe(false);
+  });
+
+  it("Preset이 목록에 없으면 false", () => {
+    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [], false, false)).toBe(false);
+  });
+
+  it("둘 다 존재하면 true", () => {
+    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [{ id: "p1" }], false, false)).toBe(true);
+  });
+
+  it("실행 중이면 false", () => {
+    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [{ id: "p1" }], true, false)).toBe(false);
+  });
+
+  it("로딩 중이면 false", () => {
+    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [{ id: "p1" }], false, true)).toBe(false);
+  });
+
+  it("Watchlist ID가 비어 있으면 false", () => {
+    expect(computeCanStart("", "p1", [{ id: "w1" }], [{ id: "p1" }], false, false)).toBe(false);
+  });
+
+  it("Preset ID가 비어 있으면 false", () => {
+    expect(computeCanStart("w1", "", [{ id: "w1" }], [{ id: "p1" }], false, false)).toBe(false);
+  });
+
+  it("둘 다 비어 있으면 false", () => {
+    expect(computeCanStart("", "", [], [], false, false)).toBe(false);
   });
 });

@@ -8,17 +8,20 @@ const THEME_STORAGE_KEY = "stock-theme";
 
 export type ThemeMode = "light" | "dark" | "system";
 
+export function resolveTheme(mode: ThemeMode, mql: MediaQueryList | null): "light" | "dark" {
+  if (mode === "system") {
+    return mql && mql.matches ? "dark" : "light";
+  }
+  return mode;
+}
+
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
   return parseThemeValue(localStorage.getItem(THEME_STORAGE_KEY));
 }
 
-function applyTheme(theme: ThemeMode, mql: MediaQueryList | null) {
-  if (theme === "system" && mql) {
-    document.documentElement.dataset.theme = mql.matches ? "dark" : "light";
-  } else {
-    document.documentElement.dataset.theme = theme;
-  }
+function applyResolvedTheme(resolved: "light" | "dark"): void {
+  document.documentElement.dataset.theme = resolved;
 }
 
 export function useTheme() {
@@ -30,24 +33,34 @@ export function useTheme() {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     setMql(mq);
     /* eslint-enable react-hooks/set-state-in-effect */
-    applyTheme(theme, mq);
+  }, []);
 
-    const handler = () => applyTheme(theme, mq);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, [theme]);
+  useEffect(() => {
+    const resolved = resolveTheme(theme, mql);
+    applyResolvedTheme(resolved);
+  }, [theme, mql]);
 
   const setTheme = useCallback(
     (next: ThemeMode) => {
       setThemeState(next);
       localStorage.setItem(THEME_STORAGE_KEY, next);
-      const current = mql || window.matchMedia("(prefers-color-scheme: dark)");
-      applyTheme(next, current);
     },
-    [mql],
+    [],
   );
 
   return { theme, setTheme };
+}
+
+export function useThemeContext() {
+  return useContext(ThemeContext);
+}
+
+function useContext<C>(ctx: React.Context<C>): C {
+  const context = React.useContext(ctx);
+  if (!context) {
+    throw new Error("useContext must be used within a ThemeProvider");
+  }
+  return context;
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

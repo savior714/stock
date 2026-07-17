@@ -58,6 +58,7 @@ type ScanRunSetupProps = {
   presets: ScanPresetSummary[];
   onOpenPresetDrawer: () => void;
   presetExists: boolean;
+  watchlistExists: boolean;
 };
 
 export default function ScanRunSetup({
@@ -69,6 +70,7 @@ export default function ScanRunSetup({
   presets,
   onOpenPresetDrawer,
   presetExists,
+  watchlistExists,
 }: ScanRunSetupProps) {
   const [state, setState] = useState<SetupState>(emptyState);
   const [presetConditionCount, setPresetConditionCount] = useState<number | null>(null);
@@ -221,6 +223,7 @@ export default function ScanRunSetup({
   const canStart =
     externalWatchlistId &&
     externalPresetId &&
+    watchlistExists &&
     presetExists &&
     !state.isRunning &&
     !state.isLoading;
@@ -293,6 +296,14 @@ export default function ScanRunSetup({
         {!externalWatchlistId && !externalPresetId ? (
           <div className={styles.setupEmptySelect}>
             Watchlist과 Preset을 모두 선택하십시오.
+          </div>
+        ) : !watchlistExists ? (
+          <div className={styles.setupEmptySelect} aria-live="polite">
+            선택한 Watchlist이 삭제되었습니다. 유효한 Watchlist을 선택하십시오.
+          </div>
+        ) : !presetExists ? (
+          <div className={styles.setupEmptySelect} aria-live="polite">
+            선택한 Preset이 삭제되었습니다. 유효한 Preset을 선택하십시오.
           </div>
         ) : externalWatchlistId && !externalPresetId ? (
           <div className={styles.setupEmptySelect} aria-live="polite">

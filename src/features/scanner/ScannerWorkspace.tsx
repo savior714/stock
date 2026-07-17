@@ -13,6 +13,8 @@ type ScannerWorkspaceProps = {
   onOpenPresetDrawer: () => void;
   watchlists: WatchlistSummary[];
   presets: ScanPresetSummary[];
+  watchlistExists: boolean;
+  presetExists: boolean;
 };
 
 export default function ScannerWorkspace({
@@ -24,19 +26,24 @@ export default function ScannerWorkspace({
   onOpenPresetDrawer,
   watchlists,
   presets,
+  watchlistExists,
+  presetExists,
 }: ScannerWorkspaceProps) {
   const selectedWatchlist = watchlists.find(
     (w) => w.id === selectedWatchlistId,
   );
 
-  const presetExists = presets.some((p) => p.id === selectedPresetId);
-
   return (
     <div>
-      {!selectedWatchlistId ? (
+      {!selectedWatchlistId || !watchlistExists ? (
         <div className="empty-state">
           <h3>스캔할 Watchlist를 선택하십시오.</h3>
           <p>왼쪽 사이드바에서 Watchlist를 선택하거나, + 버튼을 눌러 새 Watchlist를 생성하십시오.</p>
+        </div>
+      ) : !selectedPresetId || !presetExists ? (
+        <div className="empty-state">
+          <h3>스캔할 Preset을 선택하십시오.</h3>
+          <p>Preset 관리에서 스캔 조건을 설정하거나 편집하십시오.</p>
         </div>
       ) : (
         <ScanRunSetup
@@ -48,6 +55,7 @@ export default function ScannerWorkspace({
           presets={presets}
           onOpenPresetDrawer={onOpenPresetDrawer}
           presetExists={presetExists}
+          watchlistExists={watchlistExists}
         />
       )}
     </div>

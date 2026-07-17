@@ -16,57 +16,57 @@ import type { WatchlistSummary } from "@/features/watchlists/types";
 import { listScanPresets } from "@/features/scan-presets/api";
 import type { ScanPresetSummary } from "@/features/scan-presets/types";
 import { reconcileSelectedId } from "@/lib/scanner-utils";
-import { ThemeContext } from "@/lib/theme";
-import type { ThemeMode } from "@/lib/theme";
+import { useThemeContext } from "@/lib/theme";
 
 type Section = "Scanner" | "Results" | "Logs";
 type DrawerView = "watchlists" | "presets" | null;
 
-function useFocusTrap(containerRef: React.RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+function doLoadResources(
+  setWatchlists: (w: WatchlistSummary[]) => void,
+  setWatchlistLoading: (l: boolean) => void,
+  setWatchlistError: (e: string | null) => void,
+  setPresets: (p: ScanPresetSummary[]) => void,
+  setPresetsLoading: (l: boolean) => void,
+  setPresetsError: (e: string | null) => void,
+  setSelectedWatchlistId: React.Dispatch<React.SetStateAction<string>>,
+  setSelectedPresetId: React.Dispatch<React.SetStateAction<string>>,
+) {
+  setWatchlistLoading(true);
+  setPresetsLoading(true);
+  setWatchlistError(null);
+  setPresetsError(null);
 
-    const focusableSelectors = [
-      'a[href]',
-      'button:not([disabled])',
-      'input:not([disabled])',
-      'select:not([disabled])',
-      'textarea:not([disabled])',
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(", ");
+  let cancelled = false;
 
-    const focusableElements = Array.from(
-      container.querySelectorAll<HTMLElement>(focusableSelectors),
-    ).filter((el) => el.offsetParent !== null);
+  Promise.allSettled([listWatchlists(), listScanPresets()]).then(([wlResult, presetResult]) => {
+    if (cancelled) return;
 
-    if (focusableElements.length === 0) return;
+    if (wlResult.status === "fulfilled") {
+      setWatchlists(wlResult.value);
+      setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlResult.value));
+      setWatchlistLoading(false);
+    } else {
+      setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
+      setWatchlistLoading(false);
+    }
 
-    const firstElement = focusableElements[0];
-    const lastElement = focusableElements[focusableElements.length - 1];
+    if (presetResult.status === "fulfilled") {
+      setPresets(presetResult.value);
+      setSelectedPresetId((prev) => reconcileSelectedId(prev, presetResult.value));
+      setPresetsLoading(false);
+    } else {
+      setPresetsError("Preset 목록을 불러오지 못했습니다.");
+      setPresetsLoading(false);
+    }
+  });
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-
-      if (e.shiftKey) {
-        if (document.activeElement === firstElement) {
-          e.preventDefault();
-          lastElement.focus();
-        }
-      } else {
-        if (document.activeElement === lastElement) {
-          e.preventDefault();
-          firstElement.focus();
-        }
-      }
-    };
-
-    container.addEventListener("keydown", handleKeyDown);
-    return () => container.removeEventListener("keydown", handleKeyDown);
-  }, [containerRef]);
+  return () => {
+    cancelled = true;
+  };
 }
 
 export default function Home() {
+  const { theme, setTheme } = useThemeContext();
   const [active, setActive] = useState<Section>("Scanner");
   const [selectedRun, setSelectedRun] = useState<ScanRunDetail | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
@@ -80,85 +80,119 @@ export default function Home() {
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
 
   const [presets, setPresets] = useState<ScanPresetSummary[]>([]);
-  const [presetLoading, setPresetLoading] = useState(true);
-  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetsLoading, setPresetsLoading] = useState(true);
+  const [presetsError, setPresetsError] = useState<string | null>(null);
 
   const [drawer, setDrawer] = useState<DrawerView>(null);
   const [previousFocus, setPreviousFocus] = useState<HTMLElement | null>(null);
+  const [savedBodyOverflow, setSavedBodyOverflow] = useState<string | undefined>(undefined);
 
   const drawerRef = useRef<HTMLElement | null>(null);
-  useFocusTrap(drawerRef);
 
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    if (typeof window === "undefined") return "light";
-    const stored = localStorage.getItem("stock-theme");
-    if (stored === "light" || stored === "dark" || stored === "system") {
-      return stored;
+  // ── Resource loading (unmount-safe with Promise.allSettled) ──
+  useEffect(() => {
+    return doLoadResources(
+      setWatchlists,
+      setWatchlistLoading,
+      setWatchlistError,
+      setPresets,
+      setPresetsLoading,
+      setPresetsError,
+      setSelectedWatchlistId,
+      setSelectedPresetId,
+    );
+  }, []);
+
+  // ── Drawer focus trap lifecycle ──
+  useEffect(() => {
+    if (!drawer || !drawerRef.current) return;
+
+    const bodyOverflow = document.body.style.overflow;
+    setSavedBodyOverflow(bodyOverflow);
+    document.body.style.overflow = "hidden";
+    setPreviousFocus(document.activeElement as HTMLElement | null);
+
+    const container = drawerRef.current;
+    const focusableSelectors = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    const focusableElements = Array.from(
+      container.querySelectorAll<HTMLElement>(focusableSelectors),
+    ).filter((el) => el.offsetParent !== null);
+
+    if (focusableElements.length > 0) {
+      focusableElements[0].focus();
     }
-    return "light";
-  });
 
-  useEffect(() => {
-    document.documentElement.dataset.theme =
-      theme === "system"
-        ? window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light"
-        : theme;
-  }, [theme]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setDrawer(null);
+        refreshRef.current();
+        return;
+      }
 
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    setWatchlistLoading(true);
-    setWatchlistError(null);
-    setPresetLoading(true);
-    setPresetError(null);
+      if (e.key !== "Tab") return;
+
+      const currentFocusable = Array.from(
+        container.querySelectorAll<HTMLElement>(focusableSelectors),
+      ).filter((el) => el.offsetParent !== null);
+
+      if (currentFocusable.length === 0) return;
+
+      const first = currentFocusable[0];
+      const last = currentFocusable[currentFocusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = savedBodyOverflow ?? "";
+      if (previousFocus) {
+        (previousFocus as HTMLElement).focus();
+      }
+      setPreviousFocus(null);
+    };
+  }, [drawer, savedBodyOverflow, previousFocus]);
+
+  // ── Callbacks ──
+  const refreshScannerResources = useCallback(() => {
     let cancelled = false;
-    Promise.all([listWatchlists(), listScanPresets()])
-      .then(([wlData, presetData]) => {
-        if (!cancelled) {
-          setWatchlists(wlData);
-          setPresets(presetData);
-          setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlData));
-          setSelectedPresetId((prev) => reconcileSelectedId(prev, presetData));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
-          setPresetError("Preset 목록을 불러오지 못했습니다.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setWatchlistLoading(false);
-          setPresetLoading(false);
-        }
-      });
+    Promise.allSettled([listWatchlists(), listScanPresets()]).then(([wlResult, presetResult]) => {
+      if (cancelled) return;
+      if (wlResult.status === "fulfilled") {
+        setWatchlists(wlResult.value);
+        setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlResult.value));
+      }
+      if (presetResult.status === "fulfilled") {
+        setPresets(presetResult.value);
+        setSelectedPresetId((prev) => reconcileSelectedId(prev, presetResult.value));
+      }
+    });
     return () => {
       cancelled = true;
     };
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const refreshScannerResources = useCallback(() => {
-    let cancelled = false;
-    Promise.all([listWatchlists(), listScanPresets()])
-      .then(([wlData, presetData]) => {
-        if (!cancelled) {
-          setWatchlists(wlData);
-          setPresets(presetData);
-          setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlData));
-          setSelectedPresetId((prev) => reconcileSelectedId(prev, presetData));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWatchlistError("Watchlist 목록을 불러오지 못했습니다.");
-          setPresetError("Preset 목록을 불러오지 못했습니다.");
-        }
-      });
-  }, []);
+  const refreshRef = useRef(refreshScannerResources);
+  refreshRef.current = refreshScannerResources;
 
   const handleRunSelect = useCallback(async (run: ScanRunDetail) => {
     setSelectedRun(run);
@@ -194,30 +228,23 @@ export default function Home() {
   }, [active]);
 
   const handleOpenWatchlistDrawer = useCallback(() => {
-    setPreviousFocus(document.activeElement as HTMLElement | null);
     setDrawer("watchlists");
-    document.body.style.overflow = "hidden";
   }, []);
 
   const handleOpenPresetDrawer = useCallback(() => {
-    setPreviousFocus(document.activeElement as HTMLElement | null);
     setDrawer("presets");
-    document.body.style.overflow = "hidden";
   }, []);
-
-  const closeDrawer = useCallback(() => {
-    setDrawer(null);
-    document.body.style.overflow = "";
-    if (previousFocus) {
-      (previousFocus as HTMLElement).focus();
-      setPreviousFocus(null);
-    }
-    refreshScannerResources();
-  }, [previousFocus, refreshScannerResources]);
 
   const handlePresetChange = useCallback((id: string) => {
     setSelectedPresetId(id);
   }, []);
+
+  const watchlistExists = watchlists.some(
+    (w) => w.id === selectedWatchlistId,
+  );
+  const presetExists = presets.some(
+    (p) => p.id === selectedPresetId,
+  );
 
   const drawerTitle: Record<NonNullable<DrawerView>, string> = {
     watchlists: "Watchlists 관리",
@@ -246,7 +273,7 @@ export default function Home() {
         <header className="workspace-header">
           <div className="workspace-header-left">
             <h2>{active === "Scanner" ? "Scanner" : active}</h2>
-            {active === "Scanner" && selectedWatchlistId && (
+            {active === "Scanner" && selectedWatchlistId && watchlistExists && (
               <p className="workspace-context">
                 {watchlists.find((w) => w.id === selectedWatchlistId)?.name || selectedWatchlistId}
               </p>
@@ -287,6 +314,8 @@ export default function Home() {
               onOpenPresetDrawer={handleOpenPresetDrawer}
               watchlists={watchlists}
               presets={presets}
+              watchlistExists={watchlistExists}
+              presetExists={presetExists}
             />
           )
         ) : active === "Results" ? (
@@ -323,7 +352,8 @@ export default function Home() {
           className="backdrop"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              closeDrawer();
+              setDrawer(null);
+              refreshRef.current();
             }
           }}
         >
@@ -341,7 +371,10 @@ export default function Home() {
               <button
                 className="close-button"
                 type="button"
-                onClick={closeDrawer}
+                onClick={() => {
+                  setDrawer(null);
+                  refreshRef.current();
+                }}
                 aria-label="관리 Drawer 닫기"
               >
                 &times;
