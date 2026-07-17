@@ -255,83 +255,10 @@ pub async fn start_scan(
     let watchlist_id = WatchlistId::new(&request.watchlist_id)?;
     let preset_id = ScanPresetId::new(&request.preset_id)?;
 
-    // Prepare immutable symbols/conditions snapshots and create one pending row.
     let prepared =
         state.with_database(|database| prepare_scan(database, &watchlist_id, &preset_id))?;
-    let run_id = prepared.run_id.clone();
 
-    // Register cancellation before exposing the run as running.
-    state.cancellation_registry().register(&run_id).await;
-    let cancellation = state
-        .cancellation_registry()
-        .get(&run_id)
-        .await
-        .ok_or_else(|| {
-            AppError::internal("failed to register scan cancellation", run_id.0.clone())
-        })?;
-
-    if let Err(error) = state.with_database(|database| {
-        let mut repository = crate::repository::scan_run::ScanRunRepository::new(database);
-        repository.start_running(&run_id)
-    }) {
-        state.cancellation_registry().remove(&run_id).await;
-        return Err(error);
-    }
-
-    let response_run_id = run_id.0.clone();
-    let app_state_for_task = AppState::clone(state.inner());
-    let cancellation_registry = Arc::clone(state.cancellation_registry());
-
-    tauri::async_runtime::spawn(async move {
-        let task_run_id = prepared.run_id.clone();
-        let _guard = CancelGuard {
-            run_id: task_run_id.clone(),
-            registry: Arc::clone(&cancellation_registry),
-        };
-        let provider = RetryConcurrentProvider::new(YahooMarketDataProvider::new());
-        let service = crate::application::ScanService::new(
-            provider,
-            Arc::new(Mutex::new(cancellation)),
-            cancellation_registry,
-        );
-        let mut database = SharedDatabaseOps::new(app_state_for_task);
-
-        let result = execute_prepared_scan(
-            &service,
-            task_run_id.clone(),
-            prepared.preset_id,
-            prepared.symbols,
-            prepared.conditions,
-            &mut database,
-        )
-        .await;
-
-        if let Err(error) = result {
-            let run_error = ScanError {
-                run_id: task_run_id.clone(),
-                symbol: None,
-                code: format!("{:?}", error.code),
-                message: error.message,
-                detail: error.detail,
-                retryable: error.retryable,
-                attempt: 1,
-            };
-            if let Err(save_error) = database.save_scan_error(&run_error) {
-                eprintln!(
-                    "Failed to save scan error for run {}: {}",
-                    task_run_id.0, save_error
-                );
-            }
-            if let Err(mark_error) = database.mark_scan_failed(&task_run_id) {
-                eprintln!(
-                    "Failed to mark scan run {} as failed: {}",
-                    task_run_id.0, mark_error
-                );
-            }
-        }
-    });
-
-    Ok(response_run_id)
+    launch_prepared_scan(state, prepared).await
 }
 
 /// List recent scan runs.
@@ -510,6 +437,17 @@ fn prepare_retry_scan(
                 error.to_string(),
             )
         })?;
+
+    // Validate preset snapshot ID matches original run preset ID
+    if preset.id != original.preset_id {
+        return Err(AppError::internal(
+            "scan preset snapshot ID does not match the original run",
+            format!(
+                "run_id={}, stored_preset_id={}, snapshot_preset_id={}",
+                original_run_id.0, original.preset_id.0, preset.id.0,
+            ),
+        ));
+    }
 
     // Validate preset has at least one enabled condition
     if !preset.conditions.iter().any(|c| c.enabled) {
@@ -999,5 +937,101 @@ mod tests {
 
         let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
         assert_eq!(prepared.symbols.len(), 2);
+    }
+
+    // ------------------------------------------------------------------
+    // Preset snapshot ID validation
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn preset_snapshot_id_mismatch_returns_internal_error() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection();
+
+        // Insert a run with a mismatched preset snapshot ID
+        let mismatched_preset = serde_json::json!({
+            "id": "ps-different",
+            "name": "Different",
+            "conditions": [{
+                "id": "rsi:lower",
+                "indicator": "rsi",
+                "side": "lower",
+                "period": 14,
+                "threshold": 30.0,
+                "parameters": {},
+                "triggerMode": "current",
+                "enabled": true,
+                "sortOrder": 0
+            }]
+        });
+        conn.execute(
+            "UPDATE scan_runs SET preset_snapshot_json = ? WHERE id = 'run-retry-1'",
+            [&serde_json::to_string(&mismatched_preset).unwrap()],
+        )
+        .expect("must update");
+
+        let err = prepare_retry_scan(&mut db, &run_id).unwrap_err();
+        assert_eq!(err.code, AppErrorCode::Internal);
+    }
+
+    #[test]
+    fn preset_snapshot_id_mismatch_prevents_run_creation() {
+        let (mut db, run_id) = make_retry_db();
+
+        {
+            let conn = db.connection();
+            // Insert a run with a mismatched preset snapshot ID
+            let mismatched_preset = serde_json::json!({
+                "id": "ps-different",
+                "name": "Different",
+                "conditions": [{
+                    "id": "rsi:lower",
+                    "indicator": "rsi",
+                    "side": "lower",
+                    "period": 14,
+                    "threshold": 30.0,
+                    "parameters": {},
+                    "triggerMode": "current",
+                    "enabled": true,
+                    "sortOrder": 0
+                }]
+            });
+            conn.execute(
+                "UPDATE scan_runs SET preset_snapshot_json = ? WHERE id = 'run-retry-1'",
+                [&serde_json::to_string(&mismatched_preset).unwrap()],
+            )
+            .expect("must update");
+        }
+
+        // Should fail — no new run should be created
+        let result = prepare_retry_scan(&mut db, &run_id);
+        assert!(result.is_err());
+
+        // Verify no new run was created
+        let count: i64 = db
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM scan_runs WHERE retry_of_run_id = 'run-retry-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("must count");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn matching_preset_snapshot_id_succeeds() {
+        let (mut db, run_id) = make_retry_db();
+        let conn = db.connection();
+        conn.execute(
+            "INSERT INTO scan_errors (run_id, symbol, code, message, retryable) \
+             VALUES ('run-retry-1', 'AAPL', 'NETWORK_RETRY', 'retryable', 1)",
+            [],
+        )
+        .ok();
+
+        // Should succeed with matching preset ID
+        let prepared = prepare_retry_scan(&mut db, &run_id).expect("must prepare");
+        assert_eq!(prepared.preset_id.0, "ps-retry");
     }
 }

@@ -86,6 +86,7 @@ export default function Home() {
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const bodyOverflowRef = useRef("");
   const resourceRequestIdRef = useRef(0);
+  const [resumeRunId, setResumeRunId] = useState<string | null>(null);
 
   // ── Callbacks ──
   const refreshScannerResources = useCallback(() => {
@@ -129,10 +130,12 @@ export default function Home() {
     setSelectedRun(null);
     setResults([]);
     setErrors([]);
+    setResumeRunId(retryRunId);
     setActive("Scanner");
   }, []);
 
   const handleWatchlistSelect = useCallback((id: string) => {
+    setResumeRunId(null);
     setSelectedWatchlistId(id);
     setSelectedPresetId("");
     if (active !== "Scanner") {
@@ -320,6 +323,7 @@ export default function Home() {
               presetExists={presetExists}
               presetsLoading={presetsLoading}
               presetsError={presetsError}
+              resumeRunId={resumeRunId}
             />
           )
         ) : active === "Results" ? (

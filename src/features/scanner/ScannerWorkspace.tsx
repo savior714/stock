@@ -15,6 +15,7 @@ type ScannerWorkspaceProps = {
   presetExists: boolean;
   presetsLoading: boolean;
   presetsError: string | null;
+  resumeRunId: string | null;
 };
 
 export default function ScannerWorkspace({
@@ -28,8 +29,9 @@ export default function ScannerWorkspace({
   presetExists,
   presetsLoading,
   presetsError,
+  resumeRunId,
 }: ScannerWorkspaceProps) {
-  if (!selectedWatchlistId || !watchlistExists) {
+  if (!resumeRunId && (!selectedWatchlistId || !watchlistExists)) {
     return (
       <div className="empty-state">
         <h3>스캔할 Watchlist를 선택하십시오.</h3>
@@ -50,6 +52,7 @@ export default function ScannerWorkspace({
       onOpenPresetDrawer={onOpenPresetDrawer}
       presetExists={presetExists}
       watchlistExists={watchlistExists}
+      resumeRunId={resumeRunId}
     />
   );
 }

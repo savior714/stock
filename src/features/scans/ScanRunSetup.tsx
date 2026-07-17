@@ -61,6 +61,7 @@ type ScanRunSetupProps = {
   onOpenPresetDrawer: () => void;
   presetExists: boolean;
   watchlistExists: boolean;
+  resumeRunId: string | null;
 };
 
 export default function ScanRunSetup({
@@ -74,10 +75,12 @@ export default function ScanRunSetup({
   onOpenPresetDrawer,
   presetExists,
   watchlistExists,
+  resumeRunId,
 }: ScanRunSetupProps) {
   const [state, setState] = useState<SetupState>(emptyState);
   const [presetConditionCount, setPresetConditionCount] = useState<number | null>(null);
   const pollTimerRef = useRef<number | null>(null);
+  const consumedResumeRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (externalPresetId && presetExists) {
@@ -113,6 +116,38 @@ export default function ScanRunSetup({
       }
     }, 2000);
   }, []);
+
+  // ── Resume run initialization ──
+  useEffect(() => {
+    if (!resumeRunId) return;
+    if (consumedResumeRef.current === resumeRunId) return;
+    consumedResumeRef.current = resumeRunId;
+
+    let cancelled = false;
+
+    getScanRun(resumeRunId)
+      .then((detail) => {
+        if (cancelled) return;
+        setState((s) => ({
+          ...s,
+          currentRunId: resumeRunId,
+          isRunning: detail.status === "running",
+          runDetail: detail,
+          errors: [],
+          globalError: "",
+        }));
+        if (detail.status === "running") {
+          startPolling(resumeRunId);
+        }
+      })
+      .catch(() => {
+        // ignore fetch errors — polling will retry
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeRunId, startPolling]);
 
   useEffect(() => {
     if (state.currentRunId && state.isRunning) {
