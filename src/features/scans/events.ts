@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { getBackendClient } from "@/lib/backend/client";
 
 import type { ScanEventPayload, ScanEventType } from "./types";
 
@@ -10,9 +10,7 @@ export async function subscribeScanEvent(
   eventType: ScanEventType,
   callback: EventCallback,
 ): Promise<() => void> {
-  const unsubscribe = await listen<ScanEventPayload>(eventType, (event) => {
-    callback(event.payload);
-  });
+  const unsubscribe = await getBackendClient().events.subscribe(eventType, callback);
 
   eventListeners.push(unsubscribe);
 

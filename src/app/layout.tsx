@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/theme";
+import MockBadge from "@/components/MockBadge";
 
 export const metadata: Metadata = {
   title: "Stock Scanner",
@@ -36,7 +37,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <MockBadge />
+        </ThemeProvider>
       </body>
     </html>
   );

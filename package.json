@@ -4,9 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:mock": "NEXT_PUBLIC_STOCK_BACKEND=mock next dev",
     "build": "next build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:fast": "npm run lint && npm test && npm run build",
+    "verify:rust": "cd src-tauri && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test",
+    "verify:tauri": "tauri build --no-bundle --no-sign",
+    "verify:full": "npm run verify:fast && npm run verify:rust && npm run verify:tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
@@ -18,11 +24,15 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.6",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "jsdom": "^29.1.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

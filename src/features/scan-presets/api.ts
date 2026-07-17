@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getBackendClient } from "@/lib/backend/client";
 
 import type {
   ScanPresetDetail,
@@ -7,26 +7,24 @@ import type {
 } from "./types";
 
 export async function listScanPresets(): Promise<ScanPresetSummary[]> {
-  return invoke<ScanPresetSummary[]>("list_scan_presets");
+  return getBackendClient().presets.list();
 }
 
 export async function getScanPreset(id: string): Promise<ScanPresetDetail> {
-  return invoke<ScanPresetDetail>("get_scan_preset", { id });
+  return getBackendClient().presets.get(id);
 }
 
 export async function createScanPreset(input: ScanPresetInput): Promise<ScanPresetDetail> {
-  return invoke<ScanPresetDetail>("create_scan_preset", { request: input });
+  return getBackendClient().presets.create(input);
 }
 
 export async function updateScanPreset(
   id: string,
   input: ScanPresetInput,
 ): Promise<ScanPresetDetail> {
-  return invoke<ScanPresetDetail>("update_scan_preset", {
-    request: { id, ...input },
-  });
+  return getBackendClient().presets.update(id, input);
 }
 
 export async function deleteScanPreset(id: string): Promise<void> {
-  return invoke<void>("delete_scan_preset", { id });
+  return getBackendClient().presets.delete(id);
 }

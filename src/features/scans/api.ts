@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getBackendClient } from "@/lib/backend/client";
 
 import type {
   ScanError,
@@ -9,33 +9,28 @@ import type {
 } from "./types";
 
 export async function startScan(request: StartScanRequest): Promise<string> {
-  return invoke<string>("start_scan", {
-    request: {
-      watchlist_id: request.watchlistId,
-      preset_id: request.presetId,
-    },
-  });
+  return getBackendClient().scans.start(request);
 }
 
 export async function listScanRuns(limit?: number): Promise<ScanRunSummary[]> {
-  return invoke<ScanRunSummary[]>("list_scan_runs", { limit });
+  return getBackendClient().scans.listRuns(limit);
 }
 
 export async function getScanRun(runId: string): Promise<ScanRunDetail> {
-  return invoke<ScanRunDetail>("get_scan_run", { runId });
+  return getBackendClient().scans.getRun(runId);
 }
 
 export async function getScanResults(
   runId: string,
   filter?: "and" | "or" | undefined,
 ): Promise<ScanResult[]> {
-  return invoke<ScanResult[]>("get_scan_results", { runId, filter });
+  return getBackendClient().scans.getResults(runId, filter);
 }
 
 export async function getScanErrors(runId: string): Promise<ScanError[]> {
-  return invoke<ScanError[]>("get_scan_errors", { runId });
+  return getBackendClient().scans.getErrors(runId);
 }
 
 export async function cancelScan(runId: string): Promise<void> {
-  return invoke<void>("cancel_scan", { runId });
+  return getBackendClient().scans.cancel(runId);
 }

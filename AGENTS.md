@@ -48,6 +48,13 @@
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test`
 
+### 권장 실행 기준
+
+- 일반 작업 후: `npm run verify:fast`
+- Rust 또는 IPC 변경 후: `npm run verify:rust`
+- 마일스톤 종료 후: `npm run verify:tauri`
+- DMG build: 명시적으로 요청된 경우만
+
 실행 환경에서 검증하지 못한 경우 완료로 표시하지 말고 미검증 항목을 명시한다.
 
 ## Git 운영 방식
