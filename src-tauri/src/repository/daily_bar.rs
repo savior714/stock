@@ -17,21 +17,20 @@ impl<'connection> DailyBarRepository<'connection> {
 
     /// Batch upsert multiple bars in one transaction.
     /// Duplicate (symbol, trade_date) is overwritten.
-    /// Rejects if bars for the same symbol mix different price_basis values.
+    /// Rejects when a symbol mixes price bases inside the batch or with stored rows.
     pub fn upsert_batch(&mut self, bars: &[DailyBar]) -> AppResult<()> {
         if bars.is_empty() {
             return Ok(());
         }
 
-        // Validate all bars before any DB operation
         for bar in bars {
             bar.validate()?;
+            validate_trade_date(&bar.trade_date)?;
         }
 
-        // Check that all bars for the same symbol share the same price_basis
-        let mut basis_map: HashMap<&str, PriceBasis> = HashMap::new();
+        let mut basis_by_symbol: HashMap<&str, PriceBasis> = HashMap::new();
         for bar in bars {
-            if let Some(&existing) = basis_map.get(bar.symbol.as_str()) {
+            if let Some(&existing) = basis_by_symbol.get(bar.symbol.as_str()) {
                 if existing != bar.price_basis {
                     return Err(AppError::validation(format!(
                         "bars for {} mix different price_basis values",
@@ -39,7 +38,7 @@ impl<'connection> DailyBarRepository<'connection> {
                     )));
                 }
             } else {
-                basis_map.insert(bar.symbol.as_str(), bar.price_basis);
+                basis_by_symbol.insert(bar.symbol.as_str(), bar.price_basis);
             }
         }
 
@@ -48,12 +47,43 @@ impl<'connection> DailyBarRepository<'connection> {
             .transaction()
             .map_err(|error| db_error("failed to start DailyBar upsert transaction", error))?;
 
+        for (&symbol, &incoming_basis) in &basis_by_symbol {
+            let (basis_count, stored_basis): (i64, Option<String>) = transaction
+                .query_row(
+                    "SELECT COUNT(DISTINCT price_basis), MIN(price_basis)
+                     FROM daily_bars
+                     WHERE symbol = ?1",
+                    params![symbol],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|error| db_error("failed to inspect stored DailyBar price basis", error))?;
+
+            if basis_count > 1 {
+                return Err(AppError::database(
+                    "stored DailyBar rows mix price_basis values",
+                    symbol.to_string(),
+                ));
+            }
+
+            if let Some(stored_basis) = stored_basis {
+                let stored_basis = parse_price_basis(&stored_basis)?;
+                if stored_basis != incoming_basis {
+                    return Err(AppError::validation(format!(
+                        "bars for {symbol} use {}, but stored rows use {}",
+                        price_basis_db_value(incoming_basis),
+                        price_basis_db_value(stored_basis)
+                    )));
+                }
+            }
+        }
+
         for bar in bars {
             transaction
                 .execute(
                     "INSERT INTO daily_bars (symbol, trade_date, price_basis, open, high, low, close, volume)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(symbol, trade_date) DO UPDATE SET
+                       price_basis = excluded.price_basis,
                        open = excluded.open,
                        high = excluded.high,
                        low = excluded.low,
@@ -110,6 +140,14 @@ impl<'connection> DailyBarRepository<'connection> {
         start_date: &str,
         end_date: &str,
     ) -> AppResult<Vec<DailyBar>> {
+        validate_trade_date(start_date)?;
+        validate_trade_date(end_date)?;
+        if start_date > end_date {
+            return Err(AppError::validation(
+                "DailyBar range start_date must not be after end_date",
+            ));
+        }
+
         let mut statement = self
             .connection
             .prepare(
@@ -143,6 +181,7 @@ impl<'connection> DailyBarRepository<'connection> {
             .into_iter()
             .map(
                 |(symbol_str, trade_date, price_basis_str, open, high, low, close, volume)| {
+                    validate_trade_date(&trade_date)?;
                     Ok(DailyBar {
                         symbol: Symbol::new(&symbol_str)?,
                         trade_date,
@@ -177,6 +216,41 @@ fn parse_price_basis(value: &str) -> AppResult<PriceBasis> {
     }
 }
 
+fn validate_trade_date(value: &str) -> AppResult<()> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return Err(AppError::validation("trade_date must use YYYY-MM-DD"));
+    }
+
+    let year = value[0..4]
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("trade_date year must be numeric"))?;
+    let month = value[5..7]
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("trade_date month must be numeric"))?;
+    let day = value[8..10]
+        .parse::<u32>()
+        .map_err(|_| AppError::validation("trade_date day must be numeric"))?;
+
+    if year == 0 || !(1..=12).contains(&month) {
+        return Err(AppError::validation("trade_date is not a valid calendar date"));
+    }
+
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+
+    if day == 0 || day > max_day {
+        return Err(AppError::validation("trade_date is not a valid calendar date"));
+    }
+
+    Ok(())
+}
+
 fn db_error(message: &'static str, error: rusqlite::Error) -> AppError {
     AppError::database(message, error.to_string())
 }
@@ -184,3 +258,7 @@ fn db_error(message: &'static str, error: rusqlite::Error) -> AppError {
 #[cfg(test)]
 #[path = "daily_bar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "daily_bar_basis_tests.rs"]
+mod basis_tests;

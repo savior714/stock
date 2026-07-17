@@ -80,12 +80,16 @@ impl<'connection> ScanErrorRepository<'connection> {
             .collect()
     }
 
+    /// Return only symbol-scoped retryable failures.
+    /// Run-level errors have a NULL symbol and cannot be retried as individual symbols.
     pub fn get_retryable_symbols(&self, run_id: &ScanRunId) -> AppResult<Vec<String>> {
         let mut statement = self
             .connection
             .prepare(
                 "SELECT DISTINCT symbol FROM scan_errors
-                 WHERE run_id = ?1 AND retryable = 1
+                 WHERE run_id = ?1
+                   AND retryable = 1
+                   AND symbol IS NOT NULL
                  ORDER BY symbol COLLATE NOCASE",
             )
             .map_err(|error| db_error("failed to prepare retryable symbols query", error))?;
@@ -103,7 +107,9 @@ impl<'connection> ScanErrorRepository<'connection> {
             .connection
             .query_row(
                 "SELECT COUNT(DISTINCT symbol) FROM scan_errors
-                 WHERE run_id = ?1 AND retryable = 1",
+                 WHERE run_id = ?1
+                   AND retryable = 1
+                   AND symbol IS NOT NULL",
                 params![run_id.0.as_str()],
                 |row| row.get(0),
             )
@@ -114,11 +120,7 @@ impl<'connection> ScanErrorRepository<'connection> {
 }
 
 fn bool_to_int(value: bool) -> i32 {
-    if value {
-        1
-    } else {
-        0
-    }
+    if value { 1 } else { 0 }
 }
 
 fn db_error(message: &'static str, error: rusqlite::Error) -> AppError {

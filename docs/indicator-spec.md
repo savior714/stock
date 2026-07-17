@@ -16,6 +16,7 @@
 - 이후 평균은 Wilder 방식으로 갱신
 - 평균 loss가 0이고 gain이 양수이면 100
 - gain과 loss가 모두 0이면 50으로 정의
+- 첫 유효 값은 `period`개의 변화량이 확보되는 index `period`에 생성
 
 ### 조건
 
@@ -30,8 +31,11 @@
 - Typical Price: `(high + low + close) / 3`
 - Raw Money Flow: `typical_price * volume`
 - Typical Price가 전일보다 높으면 positive, 낮으면 negative, 같으면 양쪽 모두 미포함
-- negative flow가 0이고 positive가 양수이면 100
-- positive와 negative가 모두 0이면 50
+- 각 거래일의 MFI는 최근 `period`개의 분류된 money flow 합만 사용한다.
+- window에서 벗어난 과거 money flow는 다음 계산에 남기지 않는다.
+- negative flow 합이 0이고 positive flow 합이 양수이면 100
+- positive와 negative flow 합이 모두 0이면 50
+- 첫 유효 값은 `period`개의 변화량이 확보되는 index `period`에 생성
 
 ### 조건
 
@@ -40,13 +44,16 @@ RSI와 동일한 current/cross 비교 규칙을 사용한다.
 ## Bollinger Bands
 
 - 기본 기간: 20
-- 기본 표준편차 배수: 2.0
+- 앱 전략 기본 표준편차 배수: 1.0 (legacy preset 호환)
 - 기준 가격: Close
 - 중앙선: SMA
 - 표준편차: population standard deviation (`ddof = 0`)
+- index `i`의 rolling window는 현재 값인 `close[i]`를 포함한다.
+- 첫 유효 값은 `period`개의 close가 확보되는 index `period - 1`에 생성한다.
 
 ```text
-middle = SMA(close, period)
+window(i) = close[i + 1 - period ..= i]
+middle = SMA(window, period)
 upper = middle + multiplier * stddev
 lower = middle - multiplier * stddev
 ```
@@ -100,7 +107,9 @@ MVP에서는 Yahoo가 제공하는 raw OHLCV를 일관되게 사용하고 split 
 - 하락만 존재하는 RSI
 - 가격 불변 RSI
 - MFI positive-only / negative-only / flat
+- MFI rolling window에서 오래된 flow 제거
 - Bollinger constant series
+- Bollinger가 현재 close를 포함하는지
 - threshold와 정확히 같은 값
 - current와 cross 차이
 - upper/lower 동시 활성화

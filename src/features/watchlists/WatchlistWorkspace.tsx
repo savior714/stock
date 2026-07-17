@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatAppError, parseAppError } from "@/lib/app-error";
 import {
@@ -36,8 +36,11 @@ export default function WatchlistWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const detailRequestRef = useRef(0);
+  const operationRef = useRef(false);
 
   const symbols = useMemo(() => parseSymbols(form.symbolsText), [form.symbolsText]);
+  const isBusy = isLoadingDetail || isSaving;
 
   const refreshList = useCallback(async () => {
     const rows = await listWatchlists();
@@ -67,10 +70,19 @@ export default function WatchlistWorkspace() {
     void load();
     return () => {
       cancelled = true;
+      operationRef.current = false;
+      detailRequestRef.current += 1;
     };
   }, []);
 
-  async function selectWatchlist(id: string) {
+  const selectWatchlist = useCallback(async (id: string) => {
+    if (operationRef.current) {
+      return;
+    }
+
+    operationRef.current = true;
+    const requestId = detailRequestRef.current + 1;
+    detailRequestRef.current = requestId;
     setIsLoadingDetail(true);
     setError(null);
     setNotice(null);
@@ -78,23 +90,39 @@ export default function WatchlistWorkspace() {
 
     try {
       const detail = await getWatchlist(id);
-      setForm(detailToForm(detail));
+      if (detailRequestRef.current === requestId) {
+        setForm(detailToForm(detail));
+      }
     } catch (loadError) {
-      setError(formatAppError(loadError));
+      if (detailRequestRef.current === requestId) {
+        setError(formatAppError(loadError));
+      }
     } finally {
-      setIsLoadingDetail(false);
+      operationRef.current = false;
+      if (detailRequestRef.current === requestId) {
+        setIsLoadingDetail(false);
+      }
     }
-  }
+  }, []);
 
-  function startNewWatchlist() {
+  const startNewWatchlist = useCallback(() => {
+    if (operationRef.current) {
+      return;
+    }
+
+    detailRequestRef.current += 1;
     setForm(emptyWatchlistForm());
     setError(null);
     setNotice(null);
     setFieldErrors({});
-  }
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (operationRef.current) {
+      return;
+    }
+
     setError(null);
     setNotice(null);
     setFieldErrors({});
@@ -105,6 +133,7 @@ export default function WatchlistWorkspace() {
       return;
     }
 
+    operationRef.current = true;
     setIsSaving(true);
     try {
       const input = {
@@ -122,26 +151,26 @@ export default function WatchlistWorkspace() {
     } catch (saveError) {
       const payload = parseAppError(saveError);
 
-      if (payload.code === "conflict") {
-        setFieldErrors({ name: payload.message });
-      } else if (payload.code === "validation") {
+      if (payload.code === "conflict" || payload.code === "validation") {
         setFieldErrors({ name: payload.message });
       } else {
         setError(formatAppError(saveError));
       }
     } finally {
+      operationRef.current = false;
       setIsSaving(false);
     }
   }
 
   async function removeSelected() {
-    if (!form.id) {
+    if (!form.id || operationRef.current) {
       return;
     }
     if (!window.confirm(`"${form.name}" Watchlist를 삭제하시겠습니까?`)) {
       return;
     }
 
+    operationRef.current = true;
     setIsSaving(true);
     setError(null);
     setNotice(null);
@@ -154,25 +183,31 @@ export default function WatchlistWorkspace() {
     } catch (deleteError) {
       setError(formatAppError(deleteError));
     } finally {
+      operationRef.current = false;
       setIsSaving(false);
     }
   }
 
   return (
     <div className="watchlist-layout">
-      <section className="panel watchlist-browser" aria-busy={isLoadingList}>
+      <section className="panel watchlist-browser" aria-busy={isLoadingList || isBusy}>
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Saved groups</p>
             <h3>Watchlists</h3>
           </div>
-          <button className="primary-button" type="button" onClick={startNewWatchlist}>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={startNewWatchlist}
+            disabled={isBusy}
+          >
             새 목록
           </button>
         </div>
 
         {isLoadingList ? <p className="muted">목록을 불러오는 중입니다.</p> : null}
-        {!isLoadingList && watchlists.length === 0 ? (
+        {!isLoadingList && !error && watchlists.length === 0 ? (
           <div className="compact-empty">
             <strong>저장된 Watchlist가 없습니다.</strong>
             <span>새 목록을 만들어 분석 대상을 구성하십시오.</span>
@@ -186,6 +221,7 @@ export default function WatchlistWorkspace() {
               type="button"
               className={form.id === watchlist.id ? "watchlist-item active" : "watchlist-item"}
               onClick={() => void selectWatchlist(watchlist.id)}
+              disabled={isBusy}
             >
               <span>
                 <strong>{watchlist.name}</strong>
@@ -197,7 +233,7 @@ export default function WatchlistWorkspace() {
         </div>
       </section>
 
-      <section className="panel editor-panel" aria-busy={isLoadingDetail || isSaving}>
+      <section className="panel editor-panel" aria-busy={isBusy}>
         <div className="panel-heading">
           <div>
             <p className="eyebrow">{form.id ? "Edit Watchlist" : "New Watchlist"}</p>
@@ -207,7 +243,7 @@ export default function WatchlistWorkspace() {
             <button
               className="danger-button"
               type="button"
-              disabled={isSaving}
+              disabled={isBusy}
               onClick={() => void removeSelected()}
             >
               삭제
@@ -221,21 +257,19 @@ export default function WatchlistWorkspace() {
             <input
               value={form.name}
               maxLength={80}
-              disabled={isLoadingDetail || isSaving}
+              disabled={isBusy}
               placeholder="예: 전체 종목, 빅테크, 장기 매수 후보"
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
             />
           </label>
-          {fieldErrors.name ? (
-            <div className="field-error">{fieldErrors.name}</div>
-          ) : null}
+          {fieldErrors.name ? <div className="field-error">{fieldErrors.name}</div> : null}
 
           <label>
             <span>설명</span>
             <input
               value={form.description}
               maxLength={500}
-              disabled={isLoadingDetail || isSaving}
+              disabled={isBusy}
               placeholder="선택 사항"
               onChange={(event) =>
                 setForm((current) => ({ ...current, description: event.target.value }))
@@ -247,7 +281,7 @@ export default function WatchlistWorkspace() {
             <span>티커</span>
             <textarea
               value={form.symbolsText}
-              disabled={isLoadingDetail || isSaving}
+              disabled={isBusy}
               placeholder={"AAPL\nMSFT\nNVDA\nQQQ"}
               onChange={(event) =>
                 setForm((current) => ({ ...current, symbolsText: event.target.value }))
@@ -267,7 +301,7 @@ export default function WatchlistWorkspace() {
             <button
               className="secondary-button"
               type="button"
-              disabled={isSaving}
+              disabled={isBusy}
               onClick={startNewWatchlist}
             >
               초기화
@@ -275,7 +309,7 @@ export default function WatchlistWorkspace() {
             <button
               className="primary-button strong"
               type="submit"
-              disabled={isLoadingDetail || isSaving || symbols.length > 500}
+              disabled={isBusy || symbols.length > 500}
             >
               {isSaving ? "저장 중…" : form.id ? "변경 저장" : "Watchlist 생성"}
             </button>

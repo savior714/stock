@@ -35,15 +35,16 @@ export default function ScanPresetWorkspace() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<ScanPresetFormState>(emptyPresetForm());
   const noticeTimerRef = useRef<number | null>(null);
+  const operationRef = useRef(false);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const isBusy = isLoadingDetail || isSaving || isDeleting;
 
-  // notice timer cleanup on unmount
   useEffect(() => {
     return () => {
+      operationRef.current = false;
       if (noticeTimerRef.current) {
         clearTimeout(noticeTimerRef.current);
       }
@@ -57,14 +58,17 @@ export default function ScanPresetWorkspace() {
     setNotice(null);
   }, []);
 
-  const showNotice = useCallback((message: string) => {
-    clearNotice();
-    setNotice(message);
-    noticeTimerRef.current = window.setTimeout(() => {
-      noticeTimerRef.current = null;
-      setNotice(null);
-    }, 3000);
-  }, [clearNotice]);
+  const showNotice = useCallback(
+    (message: string) => {
+      clearNotice();
+      setNotice(message);
+      noticeTimerRef.current = window.setTimeout(() => {
+        noticeTimerRef.current = null;
+        setNotice(null);
+      }, 3000);
+    },
+    [clearNotice],
+  );
 
   const refreshList = useCallback(async () => {
     try {
@@ -101,26 +105,33 @@ export default function ScanPresetWorkspace() {
     };
   }, []);
 
-  const selectPreset = useCallback(
-    async (id: string) => {
-      setError(null);
-      setNotice(null);
-      setFieldErrors({});
-      setIsLoadingDetail(true);
+  const selectPreset = useCallback(async (id: string) => {
+    if (operationRef.current) {
+      return;
+    }
 
-      try {
-        const detail = await getScanPreset(id);
-        setForm(detailToForm(detail));
-      } catch (loadError) {
-        setError(formatAppError(loadError));
-      } finally {
-        setIsLoadingDetail(false);
-      }
-    },
-    [],
-  );
+    operationRef.current = true;
+    setError(null);
+    setNotice(null);
+    setFieldErrors({});
+    setIsLoadingDetail(true);
+
+    try {
+      const detail = await getScanPreset(id);
+      setForm(detailToForm(detail));
+    } catch (loadError) {
+      setError(formatAppError(loadError));
+    } finally {
+      operationRef.current = false;
+      setIsLoadingDetail(false);
+    }
+  }, []);
 
   const startNewPreset = useCallback(() => {
+    if (operationRef.current) {
+      return;
+    }
+
     setForm(emptyPresetForm());
     setError(null);
     setNotice(null);
@@ -137,15 +148,14 @@ export default function ScanPresetWorkspace() {
     [],
   );
 
-  const handleNameChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setForm((current) => ({ ...current, name: e.target.value }));
-    },
-    [],
-  );
+  const handleNameChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setForm((current) => ({ ...current, name: event.target.value }));
+  }, []);
 
   const handleSave = useCallback(async () => {
-    if (isBusy) return;
+    if (operationRef.current) {
+      return;
+    }
 
     clearNotice();
     setFieldErrors({});
@@ -157,8 +167,8 @@ export default function ScanPresetWorkspace() {
       return;
     }
 
+    operationRef.current = true;
     setIsSaving(true);
-
     const input = formToInput(form);
 
     try {
@@ -175,7 +185,6 @@ export default function ScanPresetWorkspace() {
       if (payload.code === "conflict") {
         setFieldErrors({ name: payload.message });
       } else if (payload.code === "validation") {
-        // Backend validation error — route to relevant field
         if (payload.detail && payload.detail.toLowerCase().includes("condition")) {
           setFieldErrors({ conditions: payload.message });
         } else {
@@ -185,17 +194,21 @@ export default function ScanPresetWorkspace() {
         setError(formatAppError(saveError));
       }
     } finally {
+      operationRef.current = false;
       setIsSaving(false);
     }
-  }, [form, isBusy, clearNotice, refreshList, showNotice]);
+  }, [form, clearNotice, refreshList, showNotice]);
 
   const handleDelete = useCallback(async () => {
-    if (!form.id || isBusy) return;
+    if (!form.id || operationRef.current) {
+      return;
+    }
 
     if (!window.confirm(`"${form.name}" Preset을 삭제하시겠습니까?`)) {
       return;
     }
 
+    operationRef.current = true;
     setIsDeleting(true);
 
     try {
@@ -206,13 +219,14 @@ export default function ScanPresetWorkspace() {
     } catch (deleteError) {
       setError(formatAppError(deleteError));
     } finally {
+      operationRef.current = false;
       setIsDeleting(false);
     }
-  }, [form, isBusy, refreshList, showNotice]);
+  }, [form, refreshList, showNotice]);
 
   return (
     <div className="scan-preset-layout">
-      <section className="panel scan-preset-browser" aria-busy={isLoading}>
+      <section className="panel scan-preset-browser" aria-busy={isLoading || isBusy}>
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Scan conditions</p>
@@ -268,7 +282,7 @@ export default function ScanPresetWorkspace() {
               className="danger-button"
               type="button"
               onClick={handleDelete}
-              disabled={isBusy || isSaving}
+              disabled={isBusy}
             >
               삭제
             </button>
@@ -290,9 +304,7 @@ export default function ScanPresetWorkspace() {
               placeholder="이름을 입력하십시오."
             />
           </label>
-          {fieldErrors.name ? (
-            <div className="field-error">{fieldErrors.name}</div>
-          ) : null}
+          {fieldErrors.name ? <div className="field-error">{fieldErrors.name}</div> : null}
 
           <div className="condition-grid">
             {form.conditions.map((condition) => (
@@ -318,7 +330,7 @@ export default function ScanPresetWorkspace() {
               className="primary-button strong"
               type="button"
               onClick={handleSave}
-              disabled={isBusy || isDeleting}
+              disabled={isBusy}
             >
               {form.id ? "저장" : "생성"}
             </button>
