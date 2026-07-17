@@ -20,7 +20,7 @@ jobs:
           cache: "npm"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.77.2
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: rustfmt, clippy
 
@@ -45,22 +45,7 @@ jobs:
         run: cd src-tauri && cargo fmt --check
 
       - name: Rust clippy
-        id: clippy
-        continue-on-error: true
-        run: |
-          cd src-tauri
-          cargo clippy --all-targets --all-features -- -D warnings > ../clippy.log 2>&1
-
-      - name: Upload clippy log
-        if: steps.clippy.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clippy-log
-          path: clippy.log
-
-      - name: Fail on clippy error
-        if: steps.clippy.outcome == 'failure'
-        run: exit 1
+        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Rust test
         run: cd src-tauri && cargo test
