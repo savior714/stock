@@ -141,7 +141,16 @@ export default function ScanRunSetup({
         }
       })
       .catch(() => {
-        // ignore fetch errors — polling will retry
+        // initial fetch failed — start polling so it retries
+        consumedResumeRef.current = null;
+        setState((s) => ({
+          ...s,
+          currentRunId: resumeRunId,
+          isRunning: true,
+          runDetail: null,
+          errors: [],
+          globalError: "",
+        }));
       });
 
     return () => {
