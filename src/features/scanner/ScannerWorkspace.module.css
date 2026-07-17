@@ -1,0 +1,239 @@
+.workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.resourcePanel {
+  padding: 20px;
+}
+
+.resourceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.resourceHeader h3,
+.drawerHeader h3 {
+  margin: 0;
+}
+
+.resourceDescription {
+  max-width: 420px;
+  margin: 0;
+  color: #8f98aa;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.resourceActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resourceButton {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #303848;
+  border-radius: 12px;
+  padding: 14px 15px;
+  background: #171c26;
+  color: #eef1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.resourceButton:hover {
+  border-color: #7185a8;
+  background: #202838;
+}
+
+.resourceButton span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.resourceButton strong,
+.resourceButton small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceButton small {
+  color: #8f98aa;
+}
+
+.resourceButton b {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: #0e1219;
+  color: #c9d4e7;
+  font-size: 12px;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(3 5 9 / 72%);
+  backdrop-filter: blur(3px);
+}
+
+.drawer {
+  width: min(1120px, calc(100vw - 72px));
+  height: 100%;
+  min-width: 0;
+  border-left: 1px solid #303848;
+  background: #0d1016;
+  box-shadow: -28px 0 70px rgb(0 0 0 / 38%);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  animation: drawerIn 160ms ease-out;
+}
+
+.drawerHeader {
+  min-width: 0;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #242b39;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.closeButton {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid #353d4d;
+  border-radius: 10px;
+  background: transparent;
+  color: #c3cad7;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.closeButton:hover {
+  border-color: #7185a8;
+  background: #202633;
+  color: #ffffff;
+}
+
+.drawerTabs {
+  padding: 12px 24px;
+  border-bottom: 1px solid #242b39;
+  display: flex;
+  gap: 8px;
+}
+
+.drawerTab {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 8px 12px;
+  background: transparent;
+  color: #8f98aa;
+}
+
+.drawerTab:hover {
+  color: #eef1f7;
+  background: #171c26;
+}
+
+.activeDrawerTab {
+  border-color: #52617b;
+  background: #283245;
+  color: #eef3ff;
+}
+
+.drawerBody {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 28px;
+}
+
+.drawerBody :global(.watchlist-layout),
+.drawerBody :global(.scan-preset-layout) {
+  align-items: stretch;
+}
+
+.drawerBody :global(.watchlist-browser),
+.drawerBody :global(.scan-preset-browser),
+.drawerBody :global(.editor-panel) {
+  min-height: calc(100vh - 172px);
+}
+
+@keyframes drawerIn {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .drawer {
+    width: calc(100vw - 32px);
+  }
+
+  .drawerBody :global(.watchlist-layout),
+  .drawerBody :global(.scan-preset-layout) {
+    grid-template-columns: 1fr;
+  }
+
+  .drawerBody :global(.watchlist-browser),
+  .drawerBody :global(.scan-preset-browser),
+  .drawerBody :global(.editor-panel) {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .resourceHeader {
+    display: grid;
+    gap: 10px;
+  }
+
+  .resourceDescription {
+    max-width: none;
+    text-align: left;
+  }
+
+  .resourceActions {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer {
+    width: 100vw;
+    border-left: 0;
+  }
+
+  .drawerHeader {
+    padding: 18px;
+  }
+
+  .drawerTabs {
+    padding: 10px 18px;
+    overflow-x: auto;
+  }
+
+  .drawerBody {
+    padding: 14px 18px 22px;
+  }
+}
