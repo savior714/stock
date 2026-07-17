@@ -264,7 +264,9 @@ pub async fn start_scan(
         .cancellation_registry()
         .get(&run_id)
         .await
-        .ok_or_else(|| AppError::internal("failed to register scan cancellation", run_id.0.clone()))?;
+        .ok_or_else(|| {
+            AppError::internal("failed to register scan cancellation", run_id.0.clone())
+        })?;
 
     if let Err(error) = state.with_database(|database| {
         let mut repository = crate::repository::scan_run::ScanRunRepository::new(database);
@@ -490,12 +492,9 @@ mod tests {
     #[test]
     fn condition_snapshot_preserves_bollinger_multiplier() {
         let preset_id = ScanPresetId::new("preset-lifecycle").expect("valid preset id");
-        let condition = to_signal_condition(
-            &preset_id,
-            &bollinger_detail(SignalSide::Lower, 1.5),
-            0,
-        )
-        .expect("condition must convert");
+        let condition =
+            to_signal_condition(&preset_id, &bollinger_detail(SignalSide::Lower, 1.5), 0)
+                .expect("condition must convert");
 
         assert_eq!(condition.parameters["stdDevMultiplier"], 1.5);
         assert_eq!(condition.sort_order, 0);
@@ -504,18 +503,10 @@ mod tests {
     #[test]
     fn condition_snapshot_ids_are_unique_per_side() {
         let preset_id = ScanPresetId::new("preset-lifecycle").expect("valid preset id");
-        let lower = to_signal_condition(
-            &preset_id,
-            &bollinger_detail(SignalSide::Lower, 1.0),
-            0,
-        )
-        .expect("lower condition must convert");
-        let upper = to_signal_condition(
-            &preset_id,
-            &bollinger_detail(SignalSide::Upper, 1.0),
-            1,
-        )
-        .expect("upper condition must convert");
+        let lower = to_signal_condition(&preset_id, &bollinger_detail(SignalSide::Lower, 1.0), 0)
+            .expect("lower condition must convert");
+        let upper = to_signal_condition(&preset_id, &bollinger_detail(SignalSide::Upper, 1.0), 1)
+            .expect("upper condition must convert");
 
         assert_ne!(lower.id, upper.id);
         assert!(lower.id.0.ends_with(":bollinger:lower"));

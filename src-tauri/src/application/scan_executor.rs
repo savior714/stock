@@ -1,4 +1,6 @@
-use crate::application::scan_service::{DatabaseOps, DatabaseOpsExtended, ScanRunCreateInput, ScanService};
+use crate::application::scan_service::{
+    DatabaseOps, DatabaseOpsExtended, ScanRunCreateInput, ScanService,
+};
 use crate::domain::{
     DailyBar, ScanError, ScanPreset, ScanPresetId, ScanResult, ScanRunId, SignalCondition, Symbol,
     WatchlistId,
@@ -31,9 +33,8 @@ impl DatabaseOps for SharedDatabaseOps {
     }
 
     fn load_bars(&mut self, symbol: &Symbol, start: &str, end: &str) -> AppResult<Vec<DailyBar>> {
-        self.state.with_database(|database| {
-            DatabaseOps::load_bars(database, symbol, start, end)
-        })
+        self.state
+            .with_database(|database| DatabaseOps::load_bars(database, symbol, start, end))
     }
 }
 
@@ -202,9 +203,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{
-        IndicatorKind, PriceBasis, SignalConditionId, SignalSide, TriggerMode,
-    };
+    use crate::domain::{IndicatorKind, PriceBasis, SignalConditionId, SignalSide, TriggerMode};
     use crate::error::AppError;
     use crate::state::CancellationRegistry;
     use std::sync::Arc;
@@ -318,7 +317,11 @@ mod tests {
             Ok(())
         }
 
-        fn mark_scan_completed(&mut self, id: &ScanRunId, _base_date: Option<&str>) -> AppResult<()> {
+        fn mark_scan_completed(
+            &mut self,
+            id: &ScanRunId,
+            _base_date: Option<&str>,
+        ) -> AppResult<()> {
             self.completed_run = Some(id.clone());
             Ok(())
         }
