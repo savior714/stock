@@ -9,7 +9,12 @@ import type {
 } from "./types";
 
 export async function startScan(request: StartScanRequest): Promise<string> {
-  return invoke<string>("start_scan", { request });
+  return invoke<string>("start_scan", {
+    request: {
+      watchlist_id: request.watchlistId,
+      preset_id: request.presetId,
+    },
+  });
 }
 
 export async function listScanRuns(limit?: number): Promise<ScanRunSummary[]> {
