@@ -27,4 +27,4 @@ export async function deleteWatchlist(id: string): Promise<void> {
   return invoke<void>("delete_watchlist", { id });
 }
 
-export { parseSymbols } from "./model";
+export { parseSymbols, filterSymbols, removeSymbolsBySearch } from "./model";

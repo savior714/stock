@@ -57,3 +57,35 @@ export function restoreSymbol(symbols: string[], symbol: string, index: number):
   restored.splice(insertionIndex, 0, symbol);
   return restored;
 }
+
+export function filterSymbols(symbols: string[], query: string): string[] {
+  if (!query.trim()) {
+    return symbols;
+  }
+
+  const normalizedQuery = query.trim().toUpperCase();
+  return symbols.filter((symbol) => symbol.toUpperCase().includes(normalizedQuery));
+}
+
+export function removeSymbolsBySearch(
+  symbols: string[],
+  query: string,
+): { symbols: string[]; removed: string[] } {
+  if (!query.trim()) {
+    return { symbols, removed: [] };
+  }
+
+  const normalizedQuery = query.trim().toUpperCase();
+  const matched = new Set<string>();
+
+  for (const symbol of symbols) {
+    if (symbol.toUpperCase().includes(normalizedQuery)) {
+      matched.add(symbol);
+    }
+  }
+
+  const removed = symbols.filter((symbol) => matched.has(symbol));
+  const remaining = symbols.filter((symbol) => !matched.has(symbol));
+
+  return { symbols: remaining, removed };
+}

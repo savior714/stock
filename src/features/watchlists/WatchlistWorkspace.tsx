@@ -20,8 +20,10 @@ import {
 } from "./api";
 import {
   addSymbols,
+  filterSymbols,
   MAX_WATCHLIST_SYMBOLS,
   removeSymbol,
+  removeSymbolsBySearch,
   restoreSymbol,
 } from "./model";
 import styles from "./WatchlistWorkspace.module.css";
@@ -76,6 +78,12 @@ export default function WatchlistWorkspace() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [undoRemoval, setUndoRemoval] = useState<UndoRemoval | null>(null);
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [bulkRemoveConfirmation, setBulkRemoveConfirmation] = useState<{
+    count: number;
+    symbols: string[];
+  } | null>(null);
 
   const detailRequestRef = useRef(0);
   const operationRef = useRef(false);
@@ -375,6 +383,76 @@ export default function WatchlistWorkspace() {
     clearUndo();
   }
 
+  function handleSearchChange(event: ChangeEvent<HTMLInputElement>) {
+    const value = event.target.value.toUpperCase();
+    setSearchQuery(value);
+
+    if (!value.trim() || !form.id) {
+      setSearchResults([]);
+      return;
+    }
+
+    const results = filterSymbols(form.symbols, value);
+    setSearchResults(results);
+  }
+
+  function clearSearch() {
+    setSearchQuery("");
+    setSearchResults([]);
+  }
+
+  function requestBulkRemove() {
+    if (!form.id || searchResults.length === 0 || operationRef.current || symbolSyncRef.current) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setSymbolNotice(null);
+    setBulkRemoveConfirmation({
+      count: searchResults.length,
+      symbols: [...searchResults],
+    });
+    setSearchResults([]);
+    setSearchQuery("");
+  }
+
+  function cancelBulkRemove() {
+    setBulkRemoveConfirmation(null);
+  }
+
+  async function confirmBulkRemove() {
+    if (!form.id || !bulkRemoveConfirmation || operationRef.current || symbolSyncRef.current) {
+      return;
+    }
+
+    const { symbols: symbolsToRemove } = bulkRemoveConfirmation;
+    operationRef.current = true;
+    setIsSaving(true);
+    setError(null);
+    setNotice(null);
+    setSymbolNotice(null);
+    setBulkRemoveConfirmation(null);
+    setSearchResults([]);
+    setSearchQuery("");
+
+    try {
+      let nextSymbols = [...form.symbols];
+      for (const symbol of symbolsToRemove) {
+        nextSymbols = removeSymbol(nextSymbols, symbol);
+      }
+
+      updateDesiredSymbols(nextSymbols);
+      setSymbolNotice(`${symbolsToRemove.length}개 티커를 검색으로 삭제했습니다.`);
+    } catch (saveError) {
+      setError(formatAppError(saveError));
+    } finally {
+      operationRef.current = false;
+      setIsSaving(false);
+    }
+  }
+
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (operationRef.current || symbolSyncRef.current || deleteConfirmationId) {
@@ -572,6 +650,33 @@ export default function WatchlistWorkspace() {
           </div>
         ) : null}
 
+        {bulkRemoveConfirmation ? (
+          <div className="message error-message" role="alert" aria-live="assertive">
+            <strong>{bulkRemoveConfirmation.count}개의 티커를 삭제하시겠습니까?</strong>
+            <p>{bulkRemoveConfirmation.symbols.join(", ")}</p>
+            <p>삭제한 티커는 복구할 수 없습니다.</p>
+            <div className="form-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={cancelBulkRemove}
+                disabled={isSaving}
+              >
+                취소
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => void confirmBulkRemove()}
+                disabled={isSaving}
+              >
+                {isSaving ? "삭제 중…" : "삭제 확인"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+
         <form
           className="watchlist-form"
           onSubmit={(event: FormEvent<HTMLFormElement>) => void submit(event)}
@@ -644,7 +749,65 @@ export default function WatchlistWorkspace() {
               </button>
             </div>
 
+            {form.id ? (
+              <div className={styles.symbolSearchRow}>
+                <input
+                  aria-label="티커 검색"
+                  value={searchQuery}
+                  disabled={isBlocking || isConfirmingDelete || bulkRemoveConfirmation !== null}
+                  placeholder="검색어 (예: TSLA)"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  onChange={handleSearchChange}
+                />
+                {searchResults.length > 0 ? (
+                  <button
+                    className="danger-button"
+                    type="button"
+                    disabled={isBlocking || isConfirmingDelete}
+                    onClick={requestBulkRemove}
+                  >
+                    {searchResults.length}개 삭제
+                  </button>
+                ) : null}
+                {searchQuery && searchResults.length === 0 ? (
+                  <span className={styles.searchNoResult}>일치하는 티커가 없습니다.</span>
+                ) : null}
+                {searchQuery && searchResults.length > 0 ? (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBlocking || isConfirmingDelete}
+                    onClick={clearSearch}
+                  >
+                    검색 취소
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
             {symbolNotice ? <div className={styles.symbolNotice}>{symbolNotice}</div> : null}
+
+            {symbolNotice ? <div className={styles.symbolNotice}>{symbolNotice}</div> : null}
+
+            {searchResults.length > 0 ? (
+              <div className={styles.symbolList} role="list" aria-label="검색 결과 티커">
+                {searchResults.map((symbol) => (
+                  <div className={styles.symbolRow} role="listitem" key={symbol}>
+                    <strong>{symbol}</strong>
+                    <button
+                      type="button"
+                      aria-label={`${symbol} 삭제`}
+                      disabled={isBlocking || isConfirmingDelete}
+                      onClick={() => removeTicker(symbol)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
 
             {form.symbols.length > 0 ? (
               <div className={styles.symbolList} role="list" aria-label="등록된 티커">
