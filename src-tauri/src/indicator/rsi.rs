@@ -85,10 +85,7 @@ mod tests {
         }
         for (i, val) in result.iter().enumerate().skip(5) {
             let v = val.unwrap();
-            assert!(
-                (v - 100.0).abs() < 1e-9,
-                "index {i} expected 100, got {v}"
-            );
+            assert!((v - 100.0).abs() < 1e-9, "index {i} expected 100, got {v}");
         }
     }
 
@@ -115,10 +112,7 @@ mod tests {
         }
         for (i, val) in result.iter().enumerate().skip(5) {
             let v = val.unwrap();
-            assert!(
-                (v - 50.0).abs() < 1e-9,
-                "index {i} expected 50, got {v}"
-            );
+            assert!((v - 50.0).abs() < 1e-9, "index {i} expected 50, got {v}");
         }
     }
 
