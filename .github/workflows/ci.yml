@@ -45,7 +45,22 @@ jobs:
         run: cd src-tauri && cargo fmt --check
 
       - name: Rust clippy
-        run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+        id: clippy
+        continue-on-error: true
+        run: |
+          cd src-tauri
+          cargo clippy --all-targets --all-features -- -D warnings > ../clippy.log 2>&1
+
+      - name: Upload clippy log
+        if: steps.clippy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-log
+          path: clippy.log
+
+      - name: Fail on clippy error
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
       - name: Rust test
         run: cd src-tauri && cargo test
