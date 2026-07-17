@@ -50,21 +50,21 @@ impl MarketDataProvider for FakeProvider {
         if self.rate_limited.contains(&sym) {
             return Err(AppError::new(
                 AppErrorCode::ProviderRateLimited,
-                format!("rate limited for {}", sym),
+                format!("rate limited for {sym}"),
             )
             .retryable(true));
         }
         if self.invalid.contains(&sym) {
             return Err(AppError::new(
                 AppErrorCode::InvalidMarketData,
-                format!("invalid data for {}", sym),
+                format!("invalid data for {sym}"),
             )
             .retryable(false));
         }
         if self.insufficient.contains(&sym) {
             return Err(AppError::new(
                 AppErrorCode::InsufficientData,
-                format!("insufficient bars for {}", sym),
+                format!("insufficient bars for {sym}"),
             )
             .retryable(false));
         }
@@ -307,13 +307,13 @@ fn make_preset(period: u32, threshold: f64) -> ScanPreset {
 async fn test_partial_failure_isolation() {
     // Build 500 symbols: SYM0001 ~ SYM0500
     let symbols: Vec<Symbol> = (1..=500)
-        .map(|i| Symbol::new(format!("SYM{:04}", i)).unwrap())
+        .map(|i| Symbol::new(format!("SYM{i:04}")).unwrap())
         .collect();
 
     // Assign error categories
-    let rate_limited: Vec<String> = (1..=10).map(|i| format!("SYM{:04}", i)).collect();
-    let invalid: Vec<String> = (11..=20).map(|i| format!("SYM{:04}", i)).collect();
-    let insufficient: Vec<String> = (21..=50).map(|i| format!("SYM{:04}", i)).collect();
+    let rate_limited: Vec<String> = (1..=10).map(|i| format!("SYM{i:04}")).collect();
+    let invalid: Vec<String> = (11..=20).map(|i| format!("SYM{i:04}")).collect();
+    let insufficient: Vec<String> = (21..=50).map(|i| format!("SYM{i:04}")).collect();
 
     let provider = FakeProvider::new(rate_limited, invalid, insufficient);
     let call_count = Arc::clone(&provider.call_count);
@@ -368,7 +368,7 @@ async fn test_partial_failure_isolation() {
 async fn test_scan_cancellation() {
     // 100 symbols
     let symbols: Vec<Symbol> = (1..=100)
-        .map(|i| Symbol::new(format!("SYM{:04}", i)).unwrap())
+        .map(|i| Symbol::new(format!("SYM{i:04}")).unwrap())
         .collect();
 
     let provider = FakeProvider::new(vec![], vec![], vec![]);
@@ -462,11 +462,11 @@ async fn test_scan_cancellation() {
 async fn test_retry_failed_symbols() {
     // 20 symbols: 5 rate_limited (retryable), 5 invalid (non-retryable), 10 success
     let symbols: Vec<Symbol> = (1..=20)
-        .map(|i| Symbol::new(format!("SYM{:04}", i)).unwrap())
+        .map(|i| Symbol::new(format!("SYM{i:04}")).unwrap())
         .collect();
 
-    let rate_limited: Vec<String> = (1..=5).map(|i| format!("SYM{:04}", i)).collect();
-    let invalid: Vec<String> = (6..=10).map(|i| format!("SYM{:04}", i)).collect();
+    let rate_limited: Vec<String> = (1..=5).map(|i| format!("SYM{i:04}")).collect();
+    let invalid: Vec<String> = (6..=10).map(|i| format!("SYM{i:04}")).collect();
 
     let provider = FakeProvider::new(rate_limited, invalid, vec![]);
     let call_count = Arc::clone(&provider.call_count);
