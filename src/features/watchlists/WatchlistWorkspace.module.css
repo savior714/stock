@@ -1,0 +1,202 @@
+.watchlistMenu {
+  position: relative;
+}
+
+.watchlistMenu summary {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #353d4d;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #c3cad7;
+  background: transparent;
+  cursor: pointer;
+  list-style: none;
+  letter-spacing: 0.08em;
+}
+
+.watchlistMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.watchlistMenu summary:hover,
+.watchlistMenu[open] summary {
+  border-color: #52617b;
+  background: #202633;
+  color: #ffffff;
+}
+
+.watchlistMenuPopover {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 170px;
+  padding: 8px;
+  border: 1px solid #303746;
+  border-radius: 12px;
+  background: #171c26;
+  box-shadow: 0 16px 36px rgb(0 0 0 / 32%);
+}
+
+.menuDangerButton {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  color: #ffb4be;
+  text-align: left;
+}
+
+.menuDangerButton:hover:not(:disabled) {
+  background: #2a171b;
+}
+
+.symbolManager {
+  display: grid;
+  gap: 12px;
+}
+
+.symbolManagerHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.symbolManagerHeading > div {
+  display: grid;
+  gap: 5px;
+}
+
+.symbolManagerHeading strong {
+  color: #c9d0dd;
+  font-size: 13px;
+}
+
+.symbolManagerHeading small {
+  color: #8f98aa;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.symbolSaveStatus {
+  flex: 0 0 auto;
+  border: 1px solid #303746;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #aeb6c5;
+  background: #0e1219;
+  font-size: 11px;
+}
+
+.symbolAddRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.symbolNotice {
+  border: 1px solid #4b5568;
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: #171d27;
+  color: #bdc7d8;
+  font-size: 12px;
+}
+
+.symbolList {
+  max-height: 330px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.symbolRow {
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #2c3442;
+  border-radius: 10px;
+  padding: 7px 8px 7px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #0d1118;
+}
+
+.symbolRow strong {
+  overflow: hidden;
+  color: #eef3ff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.symbolRow button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: #8f98aa;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.symbolRow button:hover:not(:disabled) {
+  background: #2a171b;
+  color: #ffb4be;
+}
+
+.symbolEmpty {
+  min-height: 110px;
+  border: 1px dashed #303746;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  color: #8f98aa;
+  font-size: 13px;
+  text-align: center;
+}
+
+.undoMessage {
+  border: 1px solid #4d5f7b;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #192231;
+  color: #d6e2f7;
+  font-size: 13px;
+}
+
+.undoMessage button {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: #b8cdf2;
+  font-weight: 700;
+}
+
+.undoMessage button:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+@media (max-width: 960px) {
+  .symbolList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
