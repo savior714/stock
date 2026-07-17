@@ -36,7 +36,7 @@ pub fn parse_yahoo_chart(symbol: &Symbol, body: &str) -> AppResult<Vec<DailyBar>
             } else {
                 AppError::new(
                     crate::error::AppErrorCode::InvalidMarketData,
-                    format!("no chart data for {}", symbol),
+                    format!("no chart data for {symbol}"),
                 )
             }
         })?;
@@ -44,7 +44,7 @@ pub fn parse_yahoo_chart(symbol: &Symbol, body: &str) -> AppResult<Vec<DailyBar>
     let timestamps = data.timestamp.as_ref().ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing timestamp array", symbol),
+            format!("{symbol} missing timestamp array"),
         )
     })?;
 
@@ -55,7 +55,7 @@ pub fn parse_yahoo_chart(symbol: &Symbol, body: &str) -> AppResult<Vec<DailyBar>
         .ok_or_else(|| {
             AppError::new(
                 crate::error::AppErrorCode::InvalidMarketData,
-                format!("{} missing quote indicators", symbol),
+                format!("{symbol} missing quote indicators"),
             )
         })?;
 
@@ -66,7 +66,7 @@ pub fn parse_yahoo_chart(symbol: &Symbol, body: &str) -> AppResult<Vec<DailyBar>
         .ok_or_else(|| {
             AppError::new(
                 crate::error::AppErrorCode::InvalidMarketData,
-                format!("{} missing adjclose indicators", symbol),
+                format!("{symbol} missing adjclose indicators"),
             )
         })?;
 
@@ -76,42 +76,42 @@ pub fn parse_yahoo_chart(symbol: &Symbol, body: &str) -> AppResult<Vec<DailyBar>
     let open_arr = quote.and_then(|q| q.open.as_ref()).ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing open data", symbol),
+            format!("{symbol} missing open data"),
         )
     })?;
 
     let high_arr = quote.and_then(|q| q.high.as_ref()).ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing high data", symbol),
+            format!("{symbol} missing high data"),
         )
     })?;
 
     let low_arr = quote.and_then(|q| q.low.as_ref()).ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing low data", symbol),
+            format!("{symbol} missing low data"),
         )
     })?;
 
     let close_arr = quote.and_then(|q| q.close.as_ref()).ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing close data", symbol),
+            format!("{symbol} missing close data"),
         )
     })?;
 
     let volume_arr = quote.and_then(|q| q.volume.as_ref()).ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing volume data", symbol),
+            format!("{symbol} missing volume data"),
         )
     })?;
 
     let adj_arr = adj.and_then(|a| a.adjclose.as_ref()).ok_or_else(|| {
         AppError::new(
             crate::error::AppErrorCode::InvalidMarketData,
-            format!("{} missing adjclose array", symbol),
+            format!("{symbol} missing adjclose array"),
         )
     })?;
 
@@ -145,7 +145,7 @@ pub fn parse_yahoo_chart(symbol: &Symbol, body: &str) -> AppResult<Vec<DailyBar>
         let datetime = DateTime::from_timestamp(ts, 0).ok_or_else(|| {
             AppError::new(
                 crate::error::AppErrorCode::InvalidMarketData,
-                format!("{} invalid timestamp {}", symbol, ts),
+                format!("{symbol} invalid timestamp {ts}"),
             )
         })?;
 
@@ -202,15 +202,14 @@ mod tests {
 
     fn fixture_path(name: &str) -> String {
         let project_root = env!("CARGO_MANIFEST_DIR");
-        format!("{}/tests/fixtures/yahoo/{}", project_root, name)
+        format!("{project_root}/tests/fixtures/yahoo/{name}")
     }
 
     fn read_fixture(name: &str) -> String {
         let path = fixture_path(name);
         std::fs::read_to_string(&path).unwrap_or_else(|_| {
             panic!(
-                "Fixture file not found: {}. Run: mkdir -p tests/fixtures/yahoo && touch {}",
-                path, name
+                "Fixture file not found: {path}. Run: mkdir -p tests/fixtures/yahoo && touch {name}"
             )
         })
     }

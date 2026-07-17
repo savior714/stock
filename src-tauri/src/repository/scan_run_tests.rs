@@ -183,7 +183,7 @@ fn lists_recent_runs_ordered_by_creation() {
             watchlist_id: make_watchlist_id(),
             preset_id: make_preset_id(),
             total_symbols: (i + 1) * 10,
-            preset_snapshot_json: format!(r#"{{"n":{}}}"#, i),
+            preset_snapshot_json: format!(r#"{{"n":{i}}}"#),
             symbols_snapshot_json: "[]".to_string(),
             retry_of_run_id: None,
         };

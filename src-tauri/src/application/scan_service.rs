@@ -407,7 +407,7 @@ where
         if self.is_cancelled().await {
             return Err(AppError::new(
                 AppErrorCode::Cancelled,
-                format!("scan cancelled for symbol {}", symbol),
+                format!("scan cancelled for symbol {symbol}"),
             ));
         }
 
@@ -1726,7 +1726,7 @@ mod sequential_tests {
                 if self.fail_on.contains(&symbol.as_str().to_string()) {
                     return Err(AppError::new(
                         AppErrorCode::ProviderUnavailable,
-                        format!("failed for {}", symbol),
+                        format!("failed for {symbol}"),
                     )
                     .retryable(true));
                 }
@@ -1791,7 +1791,7 @@ mod sequential_tests {
             ) -> AppResult<Vec<DailyBar>> {
                 Err(AppError::new(
                     AppErrorCode::ProviderUnavailable,
-                    format!("network error for {}", symbol),
+                    format!("network error for {symbol}"),
                 )
                 .retryable(true))
             }
@@ -2095,7 +2095,7 @@ mod concurrent_tests {
                 if self.fail_on.contains(&symbol.as_str().to_string()) {
                     return Err(AppError::new(
                         AppErrorCode::ProviderUnavailable,
-                        format!("failed for {}", symbol),
+                        format!("failed for {symbol}"),
                     )
                     .retryable(true));
                 }

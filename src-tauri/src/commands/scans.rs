@@ -463,7 +463,7 @@ pub async fn cancel_scan(state: tauri::State<'_, AppState>, run_id: String) -> A
             repo.mark_cancelled(&scan_run_id).map_err(|e| {
                 AppError::new(
                     crate::error::AppErrorCode::Validation,
-                    format!("cannot cancel scan run: {}", e),
+                    format!("cannot cancel scan run: {e}"),
                 )
             })
         })?;
