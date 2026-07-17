@@ -283,21 +283,21 @@ export default function ScanRunSetup({
           </div>
         </div>
 
-        {!externalWatchlistId && !externalPresetId ? (
-          <div className={styles.setupEmptySelect}>
-            Watchlist과 Preset을 모두 선택하십시오.
+        {!externalWatchlistId ? (
+          <div className={styles.setupEmptySelect} aria-live="polite">
+            Watchlist을(를) 선택하십시오.
           </div>
         ) : !watchlistExists ? (
           <div className={styles.setupEmptySelect} aria-live="polite">
             선택한 Watchlist이 삭제되었습니다. 유효한 Watchlist을 선택하십시오.
           </div>
-        ) : !presetExists ? (
-          <div className={styles.setupEmptySelect} aria-live="polite">
-            선택한 Preset이 삭제되었습니다. 유효한 Preset을 선택하십시오.
-          </div>
         ) : !externalPresetId ? (
           <div className={styles.setupEmptySelect} aria-live="polite">
             Scan Preset을 선택하십시오.
+          </div>
+        ) : !presetExists ? (
+          <div className={styles.setupEmptySelect} aria-live="polite">
+            선택한 Preset이 삭제되었습니다. 유효한 Preset을 선택하십시오.
           </div>
         ) : null}
 

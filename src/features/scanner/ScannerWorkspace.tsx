@@ -8,7 +8,6 @@ type ScannerWorkspaceProps = {
   selectedWatchlistId: string;
   selectedPresetId: string;
   onPresetIdChange: (id: string) => void;
-  onOpenWatchlistDrawer: () => void;
   onOpenPresetDrawer: () => void;
   watchlists: WatchlistSummary[];
   presets: ScanPresetSummary[];
@@ -22,7 +21,6 @@ export default function ScannerWorkspace({
   selectedWatchlistId,
   selectedPresetId,
   onPresetIdChange,
-  onOpenWatchlistDrawer,
   onOpenPresetDrawer,
   watchlists,
   presets,

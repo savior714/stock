@@ -10,7 +10,12 @@ export type ThemeMode = "light" | "dark" | "system";
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
-  return parseThemeValue(localStorage.getItem(THEME_STORAGE_KEY));
+
+  try {
+    return parseThemeValue(localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return "light";
+  }
 }
 
 function applyResolvedTheme(resolved: "light" | "dark"): void {
@@ -39,7 +44,11 @@ export function useTheme() {
   const setTheme = useCallback(
     (next: ThemeMode) => {
       setThemeState(next);
-      localStorage.setItem(THEME_STORAGE_KEY, next);
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, next);
+      } catch {
+        // storage full or unavailable — theme state already updated
+      }
     },
     [],
   );

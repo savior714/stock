@@ -21,7 +21,8 @@ import { useThemeContext } from "@/lib/theme";
 type Section = "Scanner" | "Results" | "Logs";
 type DrawerView = "watchlists" | "presets" | null;
 
-function doLoadResources(
+function loadResources(
+  requestIdRef: React.MutableRefObject<number>,
   setWatchlists: (w: WatchlistSummary[]) => void,
   setWatchlistLoading: (l: boolean) => void,
   setWatchlistError: (e: string | null) => void,
@@ -36,10 +37,10 @@ function doLoadResources(
   setWatchlistError(null);
   setPresetsError(null);
 
-  let cancelled = false;
+  const requestId = ++requestIdRef.current;
 
   Promise.allSettled([listWatchlists(), listScanPresets()]).then(([wlResult, presetResult]) => {
-    if (cancelled) return;
+    if (requestId !== requestIdRef.current) return;
 
     if (wlResult.status === "fulfilled") {
       setWatchlists(wlResult.value);
@@ -59,10 +60,6 @@ function doLoadResources(
       setPresetsLoading(false);
     }
   });
-
-  return () => {
-    cancelled = true;
-  };
 }
 
 export default function Home() {
@@ -91,28 +88,18 @@ export default function Home() {
   const resourceRequestIdRef = useRef(0);
 
   // ── Callbacks ──
-  const refreshScannerResources = useCallback(async () => {
-    const requestId = ++resourceRequestIdRef.current;
-
-    const results = await Promise.allSettled([
-      listWatchlists(),
-      listScanPresets(),
-    ]);
-
-    if (requestId !== resourceRequestIdRef.current) {
-      return;
-    }
-
-    const [wlResult, presetResult] = results;
-
-    if (wlResult.status === "fulfilled") {
-      setWatchlists(wlResult.value);
-      setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlResult.value));
-    }
-    if (presetResult.status === "fulfilled") {
-      setPresets(presetResult.value);
-      setSelectedPresetId((prev) => reconcileSelectedId(prev, presetResult.value));
-    }
+  const refreshScannerResources = useCallback(() => {
+    loadResources(
+      resourceRequestIdRef,
+      setWatchlists,
+      setWatchlistLoading,
+      setWatchlistError,
+      setPresets,
+      setPresetsLoading,
+      setPresetsError,
+      setSelectedWatchlistId,
+      setSelectedPresetId,
+    );
   }, []);
 
   const closeDrawer = useCallback(() => {
@@ -165,9 +152,10 @@ export default function Home() {
     setSelectedPresetId(id);
   }, []);
 
-  // ── Resource loading (unmount-safe with Promise.allSettled) ──
+  // ── Resource loading (unmount-safe with requestIdRef) ──
   useEffect(() => {
-    return doLoadResources(
+    loadResources(
+      resourceRequestIdRef,
       setWatchlists,
       setWatchlistLoading,
       setWatchlistError,
@@ -177,6 +165,10 @@ export default function Home() {
       setSelectedWatchlistId,
       setSelectedPresetId,
     );
+
+    return () => {
+      resourceRequestIdRef.current += 1;
+    };
   }, []);
 
   // ── Drawer focus trap lifecycle ──
@@ -321,7 +313,6 @@ export default function Home() {
               selectedWatchlistId={selectedWatchlistId}
               selectedPresetId={selectedPresetId}
               onPresetIdChange={handlePresetChange}
-              onOpenWatchlistDrawer={handleOpenWatchlistDrawer}
               onOpenPresetDrawer={handleOpenPresetDrawer}
               watchlists={watchlists}
               presets={presets}
