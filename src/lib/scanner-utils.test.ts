@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseThemeValue, reconcileSelectedId } from "./scanner-utils";
-import { resolveTheme } from "./theme";
+import { parseThemeValue, reconcileSelectedId, canStartScan, resolveTheme } from "./scanner-utils";
 
 // ── reconcileSelectedId ──────────────────────────────────────────
 
@@ -92,60 +91,53 @@ describe("resolveTheme", () => {
   });
 });
 
-// ── canStart logic ───────────────────────────────────────────────
+// ── canStartScan ─────────────────────────────────────────────────
 
-describe("scan canStart logic", () => {
-  type Item = { id: string };
+describe("canStartScan", () => {
+  const base = {
+    selectedWatchlistId: "w1",
+    selectedPresetId: "p1",
+    watchlistExists: true,
+    presetExists: true,
+    isRunning: false,
+    isLoading: false,
+  };
 
-  function computeCanStart(
-    selectedWatchlistId: string,
-    selectedPresetId: string,
-    watchlists: Item[],
-    presets: Item[],
-    isRunning: boolean,
-    isLoading: boolean,
-  ): boolean {
-    const watchlistExists = watchlists.some((w) => w.id === selectedWatchlistId);
-    const presetExists = presets.some((p) => p.id === selectedPresetId);
-    return !!(
-      selectedWatchlistId &&
-      selectedPresetId &&
-      watchlistExists &&
-      presetExists &&
-      !isRunning &&
-      !isLoading
-    );
-  }
-
-  it("Watchlist가 목록에 없으면 false", () => {
-    expect(computeCanStart("w1", "p1", [], [{ id: "p1" }], false, false)).toBe(false);
+  it("모든 조건이 충족되면 true", () => {
+    expect(canStartScan(base)).toBe(true);
   });
 
-  it("Preset이 목록에 없으면 false", () => {
-    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [], false, false)).toBe(false);
+  it("Watchlist ID가 없으면 false", () => {
+    expect(canStartScan({ ...base, selectedWatchlistId: "" })).toBe(false);
   });
 
-  it("둘 다 존재하면 true", () => {
-    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [{ id: "p1" }], false, false)).toBe(true);
+  it("Preset ID가 없으면 false", () => {
+    expect(canStartScan({ ...base, selectedPresetId: "" })).toBe(false);
+  });
+
+  it("Watchlist가 삭제되면 false", () => {
+    expect(canStartScan({ ...base, watchlistExists: false })).toBe(false);
+  });
+
+  it("Preset이 삭제되면 false", () => {
+    expect(canStartScan({ ...base, presetExists: false })).toBe(false);
   });
 
   it("실행 중이면 false", () => {
-    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [{ id: "p1" }], true, false)).toBe(false);
+    expect(canStartScan({ ...base, isRunning: true })).toBe(false);
   });
 
   it("로딩 중이면 false", () => {
-    expect(computeCanStart("w1", "p1", [{ id: "w1" }], [{ id: "p1" }], false, true)).toBe(false);
+    expect(canStartScan({ ...base, isLoading: true })).toBe(false);
   });
 
-  it("Watchlist ID가 비어 있으면 false", () => {
-    expect(computeCanStart("", "p1", [{ id: "w1" }], [{ id: "p1" }], false, false)).toBe(false);
-  });
-
-  it("Preset ID가 비어 있으면 false", () => {
-    expect(computeCanStart("w1", "", [{ id: "w1" }], [{ id: "p1" }], false, false)).toBe(false);
-  });
-
-  it("둘 다 비어 있으면 false", () => {
-    expect(computeCanStart("", "", [], [], false, false)).toBe(false);
+  it("Watchlist와 Preset ID가 모두 비어 있으면 false", () => {
+    expect(canStartScan({
+      ...base,
+      selectedWatchlistId: "",
+      selectedPresetId: "",
+      watchlistExists: false,
+      presetExists: false,
+    })).toBe(false);
   });
 });

@@ -20,3 +20,30 @@ export function parseThemeValue(raw: string | null): "light" | "dark" | "system"
   }
   return "light";
 }
+
+export function resolveTheme(mode: "light" | "dark" | "system", mql: MediaQueryList | null): "light" | "dark" {
+  if (mode === "system") {
+    return mql && mql.matches ? "dark" : "light";
+  }
+  return mode;
+}
+
+export type CanStartScanInput = {
+  selectedWatchlistId: string;
+  selectedPresetId: string;
+  watchlistExists: boolean;
+  presetExists: boolean;
+  isRunning: boolean;
+  isLoading: boolean;
+};
+
+export function canStartScan(input: CanStartScanInput): boolean {
+  return Boolean(
+    input.selectedWatchlistId
+    && input.selectedPresetId
+    && input.watchlistExists
+    && input.presetExists
+    && !input.isRunning
+    && !input.isLoading,
+  );
+}

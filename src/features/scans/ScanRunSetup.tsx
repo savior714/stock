@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { canStartScan } from "@/lib/scanner-utils";
 import { formatAppError } from "@/lib/app-error";
 import styles from "./ScanRunSetup.module.css";
 import { cancelScan, getScanErrors, getScanRun, startScan } from "./api";
@@ -51,11 +52,12 @@ function progressPercent(detail: ScanRunDetail): number {
 
 type ScanRunSetupProps = {
   selectedWatchlistId: string;
-  onWatchlistIdChange: (id: string) => void;
   selectedPresetId: string;
   onPresetIdChange: (id: string) => void;
   watchlists: WatchlistSummary[];
   presets: ScanPresetSummary[];
+  presetsLoading: boolean;
+  presetsError: string | null;
   onOpenPresetDrawer: () => void;
   presetExists: boolean;
   watchlistExists: boolean;
@@ -63,11 +65,12 @@ type ScanRunSetupProps = {
 
 export default function ScanRunSetup({
   selectedWatchlistId: externalWatchlistId,
-  onWatchlistIdChange,
   selectedPresetId: externalPresetId,
   onPresetIdChange,
   watchlists,
   presets,
+  presetsLoading,
+  presetsError,
   onOpenPresetDrawer,
   presetExists,
   watchlistExists,
@@ -220,18 +223,14 @@ export default function ScanRunSetup({
     }
   }, [state.currentRunId, state.isCancelling]);
 
-  const canStart =
-    externalWatchlistId &&
-    externalPresetId &&
-    watchlistExists &&
-    presetExists &&
-    !state.isRunning &&
-    !state.isLoading;
-
-  const selectedPreset = presets.find((p) => p.id === externalPresetId);
-  const selectedWatchlist = watchlists.find(
-    (w) => w.id === externalWatchlistId,
-  );
+  const canStart = canStartScan({
+    selectedWatchlistId: externalWatchlistId,
+    selectedPresetId: externalPresetId,
+    watchlistExists,
+    presetExists,
+    isRunning: state.isRunning,
+    isLoading: state.isLoading,
+  });
 
   const watchlistSymbolCount = watchlists.find(
     (w) => w.id === externalWatchlistId,
@@ -241,7 +240,7 @@ export default function ScanRunSetup({
     <div className={styles.setupArea}>
       <div className={styles.setupContext}>
         <div>
-          <p className={styles.setupContextName}>{selectedWatchlist?.name}</p>
+          <p className={styles.setupContextName}>{watchlists.find((w) => w.id === externalWatchlistId)?.name}</p>
           <p className={styles.setupContextMeta}>
             {watchlistSymbolCount
               ? `${watchlistSymbolCount.symbolCount} symbols`
@@ -266,7 +265,7 @@ export default function ScanRunSetup({
             <select
               value={externalPresetId}
               onChange={handlePresetChange}
-              disabled={state.isRunning}
+              disabled={state.isRunning || presetsLoading}
             >
               <option value="">-- 선택 --</option>
               {presets.map((p) => (
@@ -275,23 +274,14 @@ export default function ScanRunSetup({
                 </option>
               ))}
             </select>
+            {presetsLoading && (
+              <span className={styles.setupLoadingText}>Preset 목록을 불러오는 중…</span>
+            )}
+            {presetsError && (
+              <span className={styles.setupErrorText}>{presetsError}</span>
+            )}
           </div>
         </div>
-
-        {externalWatchlistId && externalPresetId && presetExists && (
-          <div className={styles.setupInfo}>
-            <span>
-              {presetConditionCount !== null
-                ? `${presetConditionCount} conditions`
-                : "— conditions"}
-            </span>
-            <span>
-              {watchlistSymbolCount
-                ? `${watchlistSymbolCount.symbolCount} symbols`
-                : "— symbols"}
-            </span>
-          </div>
-        )}
 
         {!externalWatchlistId && !externalPresetId ? (
           <div className={styles.setupEmptySelect}>
@@ -305,13 +295,13 @@ export default function ScanRunSetup({
           <div className={styles.setupEmptySelect} aria-live="polite">
             선택한 Preset이 삭제되었습니다. 유효한 Preset을 선택하십시오.
           </div>
-        ) : externalWatchlistId && !externalPresetId ? (
+        ) : !externalPresetId ? (
           <div className={styles.setupEmptySelect} aria-live="polite">
             Scan Preset을 선택하십시오.
           </div>
         ) : null}
 
-        {(externalWatchlistId || externalPresetId) && (
+        {externalWatchlistId && (
           <div className={styles.setupActions}>
             {state.isRunning ? (
               <button

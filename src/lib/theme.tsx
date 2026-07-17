@@ -2,18 +2,11 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 
-import { parseThemeValue } from "./scanner-utils";
+import { parseThemeValue, resolveTheme } from "./scanner-utils";
 
 const THEME_STORAGE_KEY = "stock-theme";
 
 export type ThemeMode = "light" | "dark" | "system";
-
-export function resolveTheme(mode: ThemeMode, mql: MediaQueryList | null): "light" | "dark" {
-  if (mode === "system") {
-    return mql && mql.matches ? "dark" : "light";
-  }
-  return mode;
-}
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
@@ -26,19 +19,22 @@ function applyResolvedTheme(resolved: "light" | "dark"): void {
 
 export function useTheme() {
   const [theme, setThemeState] = useState<ThemeMode>(getInitialTheme);
-  const [mql, setMql] = useState<MediaQueryList | null>(null);
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setMql(mq);
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, []);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
 
-  useEffect(() => {
-    const resolved = resolveTheme(theme, mql);
-    applyResolvedTheme(resolved);
-  }, [theme, mql]);
+    const apply = () => {
+      const resolved = resolveTheme(theme, media);
+      applyResolvedTheme(resolved);
+    };
+
+    apply();
+    media.addEventListener("change", apply);
+
+    return () => {
+      media.removeEventListener("change", apply);
+    };
+  }, [theme]);
 
   const setTheme = useCallback(
     (next: ThemeMode) => {

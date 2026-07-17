@@ -84,115 +84,41 @@ export default function Home() {
   const [presetsError, setPresetsError] = useState<string | null>(null);
 
   const [drawer, setDrawer] = useState<DrawerView>(null);
-  const [previousFocus, setPreviousFocus] = useState<HTMLElement | null>(null);
-  const [savedBodyOverflow, setSavedBodyOverflow] = useState<string | undefined>(undefined);
 
   const drawerRef = useRef<HTMLElement | null>(null);
-
-  // ── Resource loading (unmount-safe with Promise.allSettled) ──
-  useEffect(() => {
-    return doLoadResources(
-      setWatchlists,
-      setWatchlistLoading,
-      setWatchlistError,
-      setPresets,
-      setPresetsLoading,
-      setPresetsError,
-      setSelectedWatchlistId,
-      setSelectedPresetId,
-    );
-  }, []);
-
-  // ── Drawer focus trap lifecycle ──
-  useEffect(() => {
-    if (!drawer || !drawerRef.current) return;
-
-    const bodyOverflow = document.body.style.overflow;
-    setSavedBodyOverflow(bodyOverflow);
-    document.body.style.overflow = "hidden";
-    setPreviousFocus(document.activeElement as HTMLElement | null);
-
-    const container = drawerRef.current;
-    const focusableSelectors = [
-      'a[href]',
-      'button:not([disabled])',
-      'input:not([disabled])',
-      'select:not([disabled])',
-      'textarea:not([disabled])',
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(", ");
-
-    const focusableElements = Array.from(
-      container.querySelectorAll<HTMLElement>(focusableSelectors),
-    ).filter((el) => el.offsetParent !== null);
-
-    if (focusableElements.length > 0) {
-      focusableElements[0].focus();
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setDrawer(null);
-        refreshRef.current();
-        return;
-      }
-
-      if (e.key !== "Tab") return;
-
-      const currentFocusable = Array.from(
-        container.querySelectorAll<HTMLElement>(focusableSelectors),
-      ).filter((el) => el.offsetParent !== null);
-
-      if (currentFocusable.length === 0) return;
-
-      const first = currentFocusable[0];
-      const last = currentFocusable[currentFocusable.length - 1];
-
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = savedBodyOverflow ?? "";
-      if (previousFocus) {
-        (previousFocus as HTMLElement).focus();
-      }
-      setPreviousFocus(null);
-    };
-  }, [drawer, savedBodyOverflow, previousFocus]);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const bodyOverflowRef = useRef("");
+  const resourceRequestIdRef = useRef(0);
 
   // ── Callbacks ──
-  const refreshScannerResources = useCallback(() => {
-    let cancelled = false;
-    Promise.allSettled([listWatchlists(), listScanPresets()]).then(([wlResult, presetResult]) => {
-      if (cancelled) return;
-      if (wlResult.status === "fulfilled") {
-        setWatchlists(wlResult.value);
-        setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlResult.value));
-      }
-      if (presetResult.status === "fulfilled") {
-        setPresets(presetResult.value);
-        setSelectedPresetId((prev) => reconcileSelectedId(prev, presetResult.value));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+  const refreshScannerResources = useCallback(async () => {
+    const requestId = ++resourceRequestIdRef.current;
+
+    const results = await Promise.allSettled([
+      listWatchlists(),
+      listScanPresets(),
+    ]);
+
+    if (requestId !== resourceRequestIdRef.current) {
+      return;
+    }
+
+    const [wlResult, presetResult] = results;
+
+    if (wlResult.status === "fulfilled") {
+      setWatchlists(wlResult.value);
+      setSelectedWatchlistId((prev) => reconcileSelectedId(prev, wlResult.value));
+    }
+    if (presetResult.status === "fulfilled") {
+      setPresets(presetResult.value);
+      setSelectedPresetId((prev) => reconcileSelectedId(prev, presetResult.value));
+    }
   }, []);
 
-  const refreshRef = useRef(refreshScannerResources);
-  refreshRef.current = refreshScannerResources;
+  const closeDrawer = useCallback(() => {
+    setDrawer(null);
+    void refreshScannerResources();
+  }, [refreshScannerResources]);
 
   const handleRunSelect = useCallback(async (run: ScanRunDetail) => {
     setSelectedRun(run);
@@ -238,6 +164,92 @@ export default function Home() {
   const handlePresetChange = useCallback((id: string) => {
     setSelectedPresetId(id);
   }, []);
+
+  // ── Resource loading (unmount-safe with Promise.allSettled) ──
+  useEffect(() => {
+    return doLoadResources(
+      setWatchlists,
+      setWatchlistLoading,
+      setWatchlistError,
+      setPresets,
+      setPresetsLoading,
+      setPresetsError,
+      setSelectedWatchlistId,
+      setSelectedPresetId,
+    );
+  }, []);
+
+  // ── Drawer focus trap lifecycle ──
+  useEffect(() => {
+    if (!drawer || !drawerRef.current) return;
+
+    const container = drawerRef.current;
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    bodyOverflowRef.current = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const closeButton = container.querySelector<HTMLElement>(
+      ".close-button",
+    );
+    closeButton?.focus();
+
+    const focusableSelectors = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    function getFocusableElements(el: HTMLElement): HTMLElement[] {
+      return Array.from(
+        el.querySelectorAll<HTMLElement>(focusableSelectors),
+      ).filter((e) => e.offsetParent !== null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDrawer();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusable = getFocusableElements(container);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = bodyOverflowRef.current;
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
+  }, [drawer, closeDrawer]);
 
   const watchlistExists = watchlists.some(
     (w) => w.id === selectedWatchlistId,
@@ -307,7 +319,6 @@ export default function Home() {
           ) : (
             <ScannerWorkspace
               selectedWatchlistId={selectedWatchlistId}
-              onWatchlistIdChange={setSelectedWatchlistId}
               selectedPresetId={selectedPresetId}
               onPresetIdChange={handlePresetChange}
               onOpenWatchlistDrawer={handleOpenWatchlistDrawer}
@@ -316,6 +327,8 @@ export default function Home() {
               presets={presets}
               watchlistExists={watchlistExists}
               presetExists={presetExists}
+              presetsLoading={presetsLoading}
+              presetsError={presetsError}
             />
           )
         ) : active === "Results" ? (
@@ -352,8 +365,7 @@ export default function Home() {
           className="backdrop"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setDrawer(null);
-              refreshRef.current();
+              closeDrawer();
             }
           }}
         >
@@ -371,10 +383,7 @@ export default function Home() {
               <button
                 className="close-button"
                 type="button"
-                onClick={() => {
-                  setDrawer(null);
-                  refreshRef.current();
-                }}
+                onClick={closeDrawer}
                 aria-label="관리 Drawer 닫기"
               >
                 &times;
@@ -404,7 +413,7 @@ function RunDetailBanner({ run }: { run: ScanRunDetail }) {
             padding: "2px 8px",
             borderRadius: "999px",
             background: "var(--color-surface-raised)",
-            color: "var(--color-text-secondary)",
+            color: "var(--color-text-tertiary)",
             fontWeight: 500,
           }}
         >
