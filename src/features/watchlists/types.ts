@@ -22,12 +22,12 @@ export type WatchlistFormState = {
   id: string | null;
   name: string;
   description: string;
-  symbolsText: string;
+  symbols: string[];
 };
 
 export const emptyWatchlistForm = (): WatchlistFormState => ({
   id: null,
   name: "",
   description: "",
-  symbolsText: "",
+  symbols: [],
 });
