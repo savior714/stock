@@ -27,18 +27,4 @@ export async function deleteWatchlist(id: string): Promise<void> {
   return invoke<void>("delete_watchlist", { id });
 }
 
-export function parseSymbols(value: string): string[] {
-  const seen = new Set<string>();
-
-  return value
-    .split(/[\s,;]+/)
-    .map((symbol) => symbol.trim().toUpperCase())
-    .filter((symbol) => symbol.length > 0)
-    .filter((symbol) => {
-      if (seen.has(symbol)) {
-        return false;
-      }
-      seen.add(symbol);
-      return true;
-    });
-}
+export { parseSymbols } from "./model";
