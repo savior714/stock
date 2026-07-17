@@ -1,5 +1,6 @@
 name: CI
 
+# Validate both the frontend and the Rust application on every main PR.
 on:
   push:
     branches: [main]
