@@ -31,16 +31,31 @@ import type { BackendClient } from "./types";
 import { createMockStore, type MockStore } from "./mock-store";
 import { FIXED_RESULTS, INITIAL_PRESETS } from "./mock-fixtures";
 
+function getEnabledConditionCount(presetId: string): number {
+  const count =
+    INITIAL_PRESETS.find((preset) => preset.id === presetId)
+      ?.enabledConditionCount ?? 1;
+
+  return Math.max(1, count);
+}
+
 const DEFAULT_TRADE_DATE = "2025-07-17";
 
 function buildDeterministicMockResult(
   symbol: string,
   hash: number,
+  enabledConditionCount: number,
 ): ScanResult | null {
   if (hash === 2) {
     return null;
   }
-  const matchedConditionCount = hash % 2 === 0 ? 1 : 0;
+  const conditionCount = Math.max(1, enabledConditionCount);
+  const matchedConditionCount =
+    hash === 0
+      ? conditionCount
+      : hash === 1
+        ? Math.min(1, conditionCount)
+        : 0;
   return {
     symbol,
     tradeDate: DEFAULT_TRADE_DATE,
@@ -51,7 +66,7 @@ function buildDeterministicMockResult(
     bollingerMiddle: 100 + hash * 12,
     bollingerUpper: 110 + hash * 14,
     matchedConditionCount,
-    allConditionsMatched: matchedConditionCount > 0,
+    allConditionsMatched: matchedConditionCount === conditionCount,
     anyConditionMatched: matchedConditionCount > 0,
     dataStale: false,
   };
@@ -84,7 +99,7 @@ function buildSymbolResult(
   symbol: string,
   fixtureData: Record<string, FixtureEntryFromClient>,
   presetId: string,
-): { success: boolean; result: ScanResult | null; error: ScanError | null } {
+) {
   const fixture = fixtureData?.[symbol];
   if (fixture) {
     return {
@@ -94,9 +109,10 @@ function buildSymbolResult(
     };
   }
   const hash = symbol.charCodeAt(0) % 3;
+  const enabledConditionCount = getEnabledConditionCount(presetId);
   return {
     success: hash !== 2,
-    result: buildDeterministicMockResult(symbol, hash),
+    result: buildDeterministicMockResult(symbol, hash, enabledConditionCount),
     error: buildDeterministicMockError(symbol, hash),
   };
 }

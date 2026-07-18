@@ -213,4 +213,97 @@ describe("mock retry - result invariants", () => {
     const violations = results.filter((r) => r.matchedConditionCount === 0 && r.anyConditionMatched);
     expect(violations).toHaveLength(0);
   });
+
+  it("retry preset-1: anyConditionMatched matches matchedConditionCount > 0", async () => {
+    const client = getBackendClient();
+
+    const runId = await client.scans.start({
+      watchlistId: "wl-2",
+      presetId: "preset-1",
+    });
+    for (let i = 0; i < 4; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+
+    const errors = await client.scans.getErrors(runId);
+    const retryableErrors = errors.filter((e) => e.retryable && e.symbol !== null);
+    if (retryableErrors.length === 0) {
+      expect(true).toBe(true);
+      return;
+    }
+    const retryRunId = await client.scans.retry(runId);
+
+    for (let i = 0; i < retryableErrors.length; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(retryRunId);
+    }
+
+    const results = await client.scans.getResults(retryRunId);
+    for (const r of results) {
+      expect(r.anyConditionMatched).toBe(r.matchedConditionCount > 0);
+    }
+  });
+
+  it("retry preset-1: allConditionsMatched true means matchedCount === enabledCount (3)", async () => {
+    const client = getBackendClient();
+
+    const runId = await client.scans.start({
+      watchlistId: "wl-2",
+      presetId: "preset-1",
+    });
+    for (let i = 0; i < 4; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+
+    const errors = await client.scans.getErrors(runId);
+    const retryableErrors = errors.filter((e) => e.retryable && e.symbol !== null);
+    if (retryableErrors.length === 0) {
+      expect(true).toBe(true);
+      return;
+    }
+    const retryRunId = await client.scans.retry(runId);
+
+    for (let i = 0; i < retryableErrors.length; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(retryRunId);
+    }
+
+    const results = await client.scans.getResults(retryRunId);
+    const preset = (await client.presets.list()).find((p) => p.id === "preset-1");
+    const enabledCount = preset?.enabledConditionCount ?? 1;
+    expect(enabledCount).toBe(3);
+    for (const r of results) {
+      if (r.allConditionsMatched) {
+        expect(r.matchedConditionCount).toBe(enabledCount);
+      }
+    }
+  });
+
+  it("retry preset-1: no count > enabledCount (3)", async () => {
+    const client = getBackendClient();
+
+    const runId = await client.scans.start({
+      watchlistId: "wl-2",
+      presetId: "preset-1",
+    });
+    for (let i = 0; i < 4; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+
+    const errors = await client.scans.getErrors(runId);
+    const retryableErrors = errors.filter((e) => e.retryable && e.symbol !== null);
+    if (retryableErrors.length === 0) {
+      expect(true).toBe(true);
+      return;
+    }
+    const retryRunId = await client.scans.retry(runId);
+
+    for (let i = 0; i < retryableErrors.length; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(retryRunId);
+    }
+
+    const results = await client.scans.getResults(retryRunId);
+    const preset = (await client.presets.list()).find((p) => p.id === "preset-1");
+    const enabledCount = preset?.enabledConditionCount ?? 1;
+    const violations = results.filter((r) => r.matchedConditionCount > enabledCount);
+    expect(violations).toHaveLength(0);
+  });
 });

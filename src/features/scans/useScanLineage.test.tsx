@@ -24,6 +24,20 @@ function makeRun(id: string, retryOfRunId: string | null = null): ScanRunDetail 
   };
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("useScanLineage — stale race prevention", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,6 +83,11 @@ describe("useScanLineage — stale race prevention", () => {
 
     rerender({ run: null });
 
+    // Wait for microtask-deferred state update
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     expect(capturedResult?.runs).toHaveLength(0);
     expect(capturedResult?.isLoading).toBe(false);
   });
@@ -94,6 +113,61 @@ describe("useScanLineage — stale race prevention", () => {
     expect(result.current.runs).toHaveLength(2);
     expect(result.current.runs[0]?.id).toBe("parent-run");
     expect(result.current.runs[1]?.id).toBe("child-run");
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("does not restore stale lineage after run becomes null", async () => {
+    const parentA = makeRun("parent-a");
+    const childA = makeRun("child-a", "parent-a");
+
+    const getScanRun = vi.mocked(api.getScanRun);
+    const parentDeferred = deferred<ScanRunDetail>();
+    getScanRun.mockImplementation(async (id: string) => {
+      if (id === "parent-a") {
+        return parentDeferred.promise;
+      }
+      return childA;
+    });
+
+    const { result, rerender } = renderHook(
+      ({ run }: { run: ScanRunDetail | null }) => {
+        const r = useScanLineage(run);
+        return r;
+      },
+      { initialProps: { run: childA } },
+    );
+
+    // Flush microtasks to start the fetch
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Verify loading is true and runs is still being built
+    expect(result.current.isLoading).toBe(true);
+
+    // Change run to null while parent fetch is pending
+    rerender({ run: null });
+
+    // After null transition, runs should be empty
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.runs).toHaveLength(0);
+    expect(result.current.isLoading).toBe(false);
+
+    // Now resolve the stale parent fetch
+    parentDeferred.resolve(parentA);
+
+    // Flush microtasks
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    // Stale lineage should NOT be restored
+    expect(result.current.runs).toHaveLength(0);
     expect(result.current.isLoading).toBe(false);
   });
 });

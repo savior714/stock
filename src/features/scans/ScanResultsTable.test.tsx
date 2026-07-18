@@ -162,4 +162,44 @@ describe("ScanResultsTable — lineage navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: /original/i }));
     expect(capturedRun?.id).toBe("run-a");
   });
+
+  it("does not show lineage when run prop is omitted (Scanner context)", () => {
+    const mockLineage = vi.mocked(useScanLineageModule.useScanLineage);
+    mockLineage.mockReturnValue({
+      runs: [],
+      isLoading: false,
+      error: null,
+    });
+
+    const { container } = render(
+      <ScanResultsTable
+        results={[makeResult("AAPL", 1)]}
+        runId="run-b"
+        // No run prop — Scanner context
+      />,
+    );
+
+    expect(container.querySelector('[role="navigation"]')).toBeNull();
+  });
+
+  it("shows lineage when run prop is provided (Results context)", () => {
+    const original = makeRun("run-a");
+    const retry = makeRun("run-b", "run-a");
+    const mockLineage = vi.mocked(useScanLineageModule.useScanLineage);
+    mockLineage.mockReturnValue({
+      runs: [original, retry],
+      isLoading: false,
+      error: null,
+    });
+
+    const { container } = render(
+      <ScanResultsTable
+        results={[makeResult("AAPL", 1)]}
+        runId="run-b"
+        run={retry}
+      />,
+    );
+
+    expect(container.querySelector('[role="navigation"]')).toBeInTheDocument();
+  });
 });

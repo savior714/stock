@@ -20,10 +20,14 @@ export function useScanLineage(run: ScanRunDetail | null) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const pendingNullRef = useRef(false);
 
   const fetchLineage = useCallback(
     async (currentRun: ScanRunDetail, requestId: number) => {
       if (!currentRun?.retryOfRunId) {
+        if (requestId !== requestRef.current) {
+          return;
+        }
         setRuns([currentRun]);
         setIsLoading(false);
         setError(null);
@@ -85,15 +89,22 @@ export function useScanLineage(run: ScanRunDetail | null) {
   );
 
   useEffect(() => {
+    const requestId = ++requestRef.current;
+
     if (!run) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setRuns([]);
-      setIsLoading(false);
-      setError(null);
+      pendingNullRef.current = true;
+      // Defer state update to avoid cascading renders
+      queueMicrotask(() => {
+        if (pendingNullRef.current && requestId === requestRef.current) {
+          setRuns([]);
+          setIsLoading(false);
+          setError(null);
+        }
+      });
       return;
     }
 
-    const requestId = ++requestRef.current;
+    pendingNullRef.current = false;
     void fetchLineage(run, requestId);
   }, [run, fetchLineage]);
 

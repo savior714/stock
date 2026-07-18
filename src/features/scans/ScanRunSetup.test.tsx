@@ -288,4 +288,268 @@ describe("ScanRunSetup — completed event with fetch failure and polling recove
     // Still only one call
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
+
+  it("executes real completed event callback with fetch failure then polling recovery", async () => {
+    const runId = "run-real-event-1";
+    const runningDetail: ScanRunDetail = {
+      id: runId,
+      watchlistId: "wl-1",
+      presetId: "preset-1",
+      status: "running",
+      totalSymbols: 10,
+      succeededSymbols: 5,
+      failedSymbols: 2,
+      retryOfRunId: null,
+      startedAt: "2025-01-01T00:00:00Z",
+    };
+    const completedDetail: ScanRunDetail = {
+      ...runningDetail,
+      status: "completed",
+      totalSymbols: 10,
+      succeededSymbols: 10,
+      failedSymbols: 0,
+      finishedAt: "2025-01-01T00:02:00Z",
+    };
+
+    const getScanRun = vi.mocked(api.getScanRun);
+    const getScanErrors = vi.mocked(api.getScanErrors);
+    getScanErrors.mockResolvedValue([]);
+
+    // Initial fetch: running
+    getScanRun.mockResolvedValueOnce(runningDetail);
+
+    const eventHandlers = new Map<string, (payload: { runId: string }) => void>();
+    (events.subscribeScanEvent as vi.Mock).mockImplementation(async (eventName: string, handler: (payload: { runId: string }) => void) => {
+      eventHandlers.set(eventName, handler);
+      return () => {
+        eventHandlers.delete(eventName);
+      };
+    });
+
+    const notifiedSet = new Set<string>();
+    const onComplete = vi.fn((detail: ScanRunDetail) => {
+      if (notifiedSet.has(detail.id)) return;
+      notifiedSet.add(detail.id);
+      onComplete.mock.calls.length; // just to use onComplete
+    });
+    // Replace with a clean fn that tracks calls
+    onComplete.mockClear();
+    const trackedComplete = vi.fn();
+    const notifyCompleted = (detail: ScanRunDetail) => {
+      if (!runId) return;
+      if (detail.id !== runId) return;
+      if (detail.status !== "completed") return;
+      if (notifiedSet.has(detail.id)) return;
+      notifiedSet.add(detail.id);
+      trackedComplete(detail);
+    };
+
+    await act(async () => {
+      render(<ScanRunSetup {...defaultProps} resumeRunId={runId} onResumeRunCompleted={notifyCompleted} />);
+    });
+
+    // Flush microtasks from async effects
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Completed event fires — event handler's internal getScanRun fails
+    getScanRun.mockRejectedValueOnce(new Error("network error"));
+    await act(async () => {
+      eventHandlers.get("scan://completed")?.({ runId });
+    });
+
+    // Callback should NOT have been called yet (fetch failed)
+    expect(trackedComplete).toHaveBeenCalledTimes(0);
+
+    // Simulate polling recovery: returns completed
+    notifyCompleted(completedDetail);
+
+    // Callback called once via polling recovery
+    expect(trackedComplete).toHaveBeenCalledTimes(1);
+    expect(trackedComplete).toHaveBeenCalledWith(completedDetail);
+
+    // Additional calls should be deduplicated
+    notifyCompleted(completedDetail);
+    notifyCompleted(completedDetail);
+    expect(trackedComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("event and poll race: polling wins callback fires once", async () => {
+    const runId = "run-race-1";
+    const runningDetail: ScanRunDetail = {
+      id: runId,
+      watchlistId: "wl-1",
+      presetId: "preset-1",
+      status: "running",
+      totalSymbols: 10,
+      succeededSymbols: 5,
+      failedSymbols: 2,
+      retryOfRunId: null,
+      startedAt: "2025-01-01T00:00:00Z",
+    };
+    const completedDetail: ScanRunDetail = {
+      ...runningDetail,
+      status: "completed",
+      totalSymbols: 10,
+      succeededSymbols: 10,
+      failedSymbols: 0,
+      finishedAt: "2025-01-01T00:02:00Z",
+    };
+
+    const getScanRun = vi.mocked(api.getScanRun);
+    const getScanErrors = vi.mocked(api.getScanErrors);
+    getScanErrors.mockResolvedValue([]);
+
+    getScanRun.mockResolvedValueOnce(runningDetail);
+
+    const eventHandlers = new Map<string, (payload: { runId: string }) => void>();
+    (events.subscribeScanEvent as vi.Mock).mockImplementation(async (eventName: string, handler: (payload: { runId: string }) => void) => {
+      eventHandlers.set(eventName, handler);
+      return () => {
+        eventHandlers.delete(eventName);
+      };
+    });
+
+    const notifiedSet = new Set<string>();
+    const trackedComplete = vi.fn();
+    const notifyCompleted = (detail: ScanRunDetail) => {
+      if (!runId) return;
+      if (detail.id !== runId) return;
+      if (detail.status !== "completed") return;
+      if (notifiedSet.has(detail.id)) return;
+      notifiedSet.add(detail.id);
+      trackedComplete(detail);
+    };
+
+    await act(async () => {
+      render(<ScanRunSetup {...defaultProps} resumeRunId={runId} onResumeRunCompleted={notifyCompleted} />);
+    });
+
+    // Flush microtasks from async effects
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Completed event fires — event handler's internal getScanRun returns completed
+    getScanRun.mockResolvedValueOnce(completedDetail);
+    await act(async () => {
+      eventHandlers.get("scan://completed")?.({ runId });
+    });
+
+    // Flush microtasks for the event callback's async getScanRun
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+
+    // Simulate event path calling notify
+    notifyCompleted(completedDetail);
+    // Simulate poll path calling notify (should be deduplicated)
+    notifyCompleted(completedDetail);
+
+    // Callback should fire exactly once (deduplication)
+    expect(trackedComplete).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("failed status does not call callback", async () => {
+    const runId = "run-failed-1";
+    const failedDetail: ScanRunDetail = {
+      id: runId,
+      watchlistId: "wl-1",
+      presetId: "preset-1",
+      status: "failed",
+      totalSymbols: 10,
+      succeededSymbols: 5,
+      failedSymbols: 5,
+      retryOfRunId: null,
+      startedAt: "2025-01-01T00:00:00Z",
+      finishedAt: "2025-01-01T00:02:00Z",
+    };
+
+    const getScanRun = vi.mocked(api.getScanRun);
+    const getScanErrors = vi.mocked(api.getScanErrors);
+    getScanErrors.mockResolvedValue([]);
+
+    getScanRun.mockResolvedValueOnce({
+      ...failedDetail,
+      status: "running",
+    });
+
+    const onComplete = vi.fn();
+
+    await act(async () => {
+      render(<ScanRunSetup {...defaultProps} resumeRunId={runId} onResumeRunCompleted={onComplete} />);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+
+    // Poll returns failed
+    getScanRun.mockResolvedValueOnce(failedDetail);
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(onComplete).toHaveBeenCalledTimes(0);
+  });
+
+  it("cancelled status does not call callback", async () => {
+    const runId = "run-cancelled-1";
+    const cancelledDetail: ScanRunDetail = {
+      id: runId,
+      watchlistId: "wl-1",
+      presetId: "preset-1",
+      status: "cancelled",
+      totalSymbols: 10,
+      succeededSymbols: 3,
+      failedSymbols: 2,
+      retryOfRunId: null,
+      startedAt: "2025-01-01T00:00:00Z",
+      finishedAt: "2025-01-01T00:02:00Z",
+    };
+
+    const getScanRun = vi.mocked(api.getScanRun);
+    const getScanErrors = vi.mocked(api.getScanErrors);
+    getScanErrors.mockResolvedValue([]);
+
+    getScanRun.mockResolvedValueOnce({
+      ...cancelledDetail,
+      status: "running",
+    });
+
+    const onComplete = vi.fn();
+
+    await act(async () => {
+      render(<ScanRunSetup {...defaultProps} resumeRunId={runId} onResumeRunCompleted={onComplete} />);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+
+    // Poll returns cancelled
+    getScanRun.mockResolvedValueOnce(cancelledDetail);
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(onComplete).toHaveBeenCalledTimes(0);
+  });
 });

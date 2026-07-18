@@ -9,10 +9,10 @@ import ScanLogsPanel from "@/features/scans/ScanLogsPanel";
 import ScanRunHistory from "@/features/scans/ScanRunHistory";
 import ScanLineageTrail from "@/features/scans/ScanLineageTrail";
 import { useScanLineage } from "@/features/scans/useScanLineage";
+import { useRunSelection } from "@/features/scans/useRunSelection";
 import WatchlistWorkspace from "@/features/watchlists/WatchlistWorkspace";
 import ScanPresetWorkspace from "@/features/scan-presets/ScanPresetWorkspace";
 import type { ScanRunDetail, ScanResult, ScanError } from "@/features/scans/types";
-import { getScanResults, getScanErrors } from "@/features/scans/api";
 import { listWatchlists } from "@/features/watchlists/api";
 import type { WatchlistSummary } from "@/features/watchlists/types";
 import { listScanPresets } from "@/features/scan-presets/api";
@@ -68,10 +68,16 @@ function loadResources(
 export default function Home() {
   const { theme, setTheme } = useThemeContext();
   const [active, setActive] = useState<Section>("Scanner");
-  const [selectedRun, setSelectedRun] = useState<ScanRunDetail | null>(null);
-  const [results, setResults] = useState<ScanResult[]>([]);
-  const [errors, setErrors] = useState<ScanError[]>([]);
-  const [isLoadingResults, setIsLoadingResults] = useState(false);
+
+  const {
+    selectedRun,
+    results: selectionResults,
+    errors: selectionErrors,
+    isLoading: isLoadingResults,
+    loadAndSelectRun,
+    clearSelection,
+    invalidatePendingSelection,
+  } = useRunSelection();
 
   const [selectedWatchlistId, setSelectedWatchlistId] = useState("");
   const [selectedPresetId, setSelectedPresetId] = useState("");
@@ -89,7 +95,6 @@ export default function Home() {
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const bodyOverflowRef = useRef("");
   const resourceRequestIdRef = useRef(0);
-  const runSelectionRequestRef = useRef(0);
   const [resumeRunId, setResumeRunId] = useState<string | null>(null);
 
   const refreshScannerResources = useCallback(() => {
@@ -111,41 +116,12 @@ export default function Home() {
     void refreshScannerResources();
   }, [refreshScannerResources]);
 
-  // ── Unified run selection with request generation token ──
-  const loadAndSelectRun = useCallback(
-    async (run: ScanRunDetail, destination: RunDestination) => {
-      const requestId = ++runSelectionRequestRef.current;
-
-      setSelectedRun(run);
-      setActive(destination);
-      setIsLoadingResults(true);
-
-      try {
-        const [nextResults, nextErrors] = await Promise.all([
-          getScanResults(run.id),
-          getScanErrors(run.id),
-        ]);
-
-        if (requestId !== runSelectionRequestRef.current) {
-          return;
-        }
-
-        setResults(nextResults);
-        setErrors(nextErrors);
-      } catch {
-        if (requestId !== runSelectionRequestRef.current) {
-          return;
-        }
-
-        setResults([]);
-        setErrors([]);
-      } finally {
-        if (requestId === runSelectionRequestRef.current) {
-          setIsLoadingResults(false);
-        }
-      }
+  const handleResumeRunCompleted = useCallback(
+    (run: ScanRunDetail) => {
+      setResumeRunId(null);
+      void loadAndSelectRun(run, "Results");
     },
-    [],
+    [loadAndSelectRun],
   );
 
   const handleRunSelect = useCallback(
@@ -156,26 +132,12 @@ export default function Home() {
     [active, loadAndSelectRun],
   );
 
-  const handleResumeRunCompleted = useCallback(
-    (run: ScanRunDetail) => {
-      setResumeRunId(null);
-      void loadAndSelectRun(run, "Results");
-    },
-    [loadAndSelectRun],
-  );
-
-  const invalidatePendingSelection = useCallback(() => {
-    runSelectionRequestRef.current += 1;
-  }, []);
-
   const handleRetry = useCallback(async (retryRunId: string) => {
     invalidatePendingSelection();
-    setSelectedRun(null);
-    setResults([]);
-    setErrors([]);
+    clearSelection();
     setResumeRunId(retryRunId);
     setActive("Scanner");
-  }, [invalidatePendingSelection]);
+  }, [invalidatePendingSelection, clearSelection]);
 
   const handleWatchlistSelect = useCallback((id: string) => {
     invalidatePendingSelection();
@@ -336,9 +298,7 @@ export default function Home() {
               type="button"
               onClick={() => {
                 invalidatePendingSelection();
-                setSelectedRun(null);
-                setResults([]);
-                setErrors([]);
+                clearSelection();
               }}
             >
               New Run
@@ -356,13 +316,9 @@ export default function Home() {
                 }}
               />
               <ScanResultsTable
-                results={results}
+                results={selectionResults}
                 runId={selectedRun.id}
                 isLoading={isLoadingResults}
-                run={selectedRun}
-                onRunSelect={(run) => {
-                  void loadAndSelectRun(run, "Results");
-                }}
               />
             </div>
           ) : (
@@ -384,7 +340,7 @@ export default function Home() {
         ) : active === "Results" ? (
           selectedRun ? (
             <ScanResultsTable
-              results={results}
+              results={selectionResults}
               runId={selectedRun.id}
               isLoading={isLoadingResults}
               run={selectedRun}
