@@ -12,6 +12,7 @@ import styles from "./ScanLogsPanel.module.css";
 type ScanLogsPanelProps = {
   runId: string;
   onRetry: (retryRunId: string) => void;
+  onRunSelect?: (run: ScanRunDetail) => void;
 };
 
 type PanelState = {
@@ -50,6 +51,7 @@ function RetryBadge({ retryable }: { retryable: boolean }) {
 export default function ScanLogsPanel({
   runId,
   onRetry,
+  onRunSelect,
 }: ScanLogsPanelProps) {
   const [state, setState] = useState<PanelState>({
     errors: [],
@@ -89,8 +91,7 @@ export default function ScanLogsPanel({
   const { runs: lineageRuns, isLoading: lineageLoading } = useScanLineage(state.runDetail);
 
   const handleLineageRunSelect = (selectedRun: ScanRunDetail) => {
-    // The parent handles run selection via handleRunSelect in page.tsx
-    // This is a no-op here since Logs panel doesn't navigate
+    onRunSelect?.(selectedRun);
   };
 
   const retryableSymbols = getRetryableSymbols(state.errors);

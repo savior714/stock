@@ -22,6 +22,7 @@ import { useThemeContext } from "@/lib/theme";
 
 type Section = "Scanner" | "Results" | "Logs";
 type DrawerView = "watchlists" | "presets" | null;
+type RunDestination = "Results" | "Logs";
 
 function loadResources(
   requestIdRef: React.MutableRefObject<number>,
@@ -88,9 +89,9 @@ export default function Home() {
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const bodyOverflowRef = useRef("");
   const resourceRequestIdRef = useRef(0);
+  const runSelectionRequestRef = useRef(0);
   const [resumeRunId, setResumeRunId] = useState<string | null>(null);
 
-  // ── Callbacks ──
   const refreshScannerResources = useCallback(() => {
     loadResources(
       resourceRequestIdRef,
@@ -110,70 +111,81 @@ export default function Home() {
     void refreshScannerResources();
   }, [refreshScannerResources]);
 
-  const handleRunSelect = useCallback(async (run: ScanRunDetail) => {
-    setSelectedRun(run);
-    setIsLoadingResults(true);
-    try {
-      const [res, err] = await Promise.all([
-        getScanResults(run.id),
-        getScanErrors(run.id),
-      ]);
-      setResults(res);
-      setErrors(err);
-    } catch {
-      setResults([]);
-      setErrors([]);
-    } finally {
-      setIsLoadingResults(false);
-    }
-  }, []);
-
-  const handleRetry = useCallback(async (retryRunId: string) => {
-    setSelectedRun(null);
-    setResults([]);
-    setErrors([]);
-    setResumeRunId(retryRunId);
-    setActive("Scanner");
-  }, []);
-
+  // ── Unified run selection with request generation token ──
   const loadAndSelectRun = useCallback(
-    async (run: ScanRunDetail, destination: "Results" | "Logs") => {
+    async (run: ScanRunDetail, destination: RunDestination) => {
+      const requestId = ++runSelectionRequestRef.current;
+
       setSelectedRun(run);
+      setActive(destination);
       setIsLoadingResults(true);
+
       try {
-        const [res, err] = await Promise.all([
+        const [nextResults, nextErrors] = await Promise.all([
           getScanResults(run.id),
           getScanErrors(run.id),
         ]);
-        setResults(res);
-        setErrors(err);
+
+        if (requestId !== runSelectionRequestRef.current) {
+          return;
+        }
+
+        setResults(nextResults);
+        setErrors(nextErrors);
       } catch {
+        if (requestId !== runSelectionRequestRef.current) {
+          return;
+        }
+
         setResults([]);
         setErrors([]);
       } finally {
-        setIsLoadingResults(false);
+        if (requestId === runSelectionRequestRef.current) {
+          setIsLoadingResults(false);
+        }
       }
     },
     [],
   );
 
+  const handleRunSelect = useCallback(
+    (run: ScanRunDetail) => {
+      const destination: RunDestination = active === "Logs" ? "Logs" : "Results";
+      void loadAndSelectRun(run, destination);
+    },
+    [active, loadAndSelectRun],
+  );
+
   const handleResumeRunCompleted = useCallback(
-    async (run: ScanRunDetail) => {
+    (run: ScanRunDetail) => {
       setResumeRunId(null);
-      await loadAndSelectRun(run, "Results");
-      setActive("Results");
+      void loadAndSelectRun(run, "Results");
     },
     [loadAndSelectRun],
   );
 
+  const invalidatePendingSelection = useCallback(() => {
+    runSelectionRequestRef.current += 1;
+  }, []);
+
+  const handleRetry = useCallback(async (retryRunId: string) => {
+    invalidatePendingSelection();
+    setSelectedRun(null);
+    setResults([]);
+    setErrors([]);
+    setResumeRunId(retryRunId);
+    setActive("Scanner");
+  }, [invalidatePendingSelection]);
+
   const handleWatchlistSelect = useCallback((id: string) => {
+    invalidatePendingSelection();
     setResumeRunId(null);
     setSelectedWatchlistId(id);
     setSelectedPresetId("");
     if (active !== "Scanner") {
       setActive("Scanner");
     }
-  }, [active]);
+  }, [active, invalidatePendingSelection]);
 
   const handleOpenWatchlistDrawer = useCallback(() => {
     setDrawer("watchlists");
@@ -323,6 +335,7 @@ export default function Home() {
               className="secondary-button"
               type="button"
               onClick={() => {
+                invalidatePendingSelection();
                 setSelectedRun(null);
                 setResults([]);
                 setErrors([]);
@@ -336,11 +349,20 @@ export default function Home() {
         {active === "Scanner" ? (
           selectedRun ? (
             <div style={{ display: "grid", gap: "16px" }}>
-              <RunDetailBanner run={selectedRun} />
+              <RunDetailBanner
+                run={selectedRun}
+                onLineageRunSelect={(run) => {
+                  void loadAndSelectRun(run, "Results");
+                }}
+              />
               <ScanResultsTable
                 results={results}
                 runId={selectedRun.id}
                 isLoading={isLoadingResults}
+                run={selectedRun}
+                onRunSelect={(run) => {
+                  void loadAndSelectRun(run, "Results");
+                }}
               />
             </div>
           ) : (
@@ -366,6 +388,9 @@ export default function Home() {
               runId={selectedRun.id}
               isLoading={isLoadingResults}
               run={selectedRun}
+              onRunSelect={(run) => {
+                void loadAndSelectRun(run, "Results");
+              }}
             />
           ) : (
             <ScanRunHistory onRunSelect={handleRunSelect} />
@@ -375,6 +400,9 @@ export default function Home() {
             <ScanLogsPanel
               runId={selectedRun.id}
               onRetry={handleRetry}
+              onRunSelect={(run) => {
+                void loadAndSelectRun(run, "Logs");
+              }}
             />
           ) : (
             <ScanRunHistory onRunSelect={handleRunSelect} />
@@ -429,7 +457,13 @@ export default function Home() {
   );
 }
 
-function RunDetailBanner({ run }: { run: ScanRunDetail }) {
+function RunDetailBanner({
+  run,
+  onLineageRunSelect,
+}: {
+  run: ScanRunDetail;
+  onLineageRunSelect?: (run: ScanRunDetail) => void;
+}) {
   const { runs: lineageRuns } = useScanLineage(run);
 
   return (
@@ -459,6 +493,7 @@ function RunDetailBanner({ run }: { run: ScanRunDetail }) {
         <ScanLineageTrail
           runs={lineageRuns}
           currentRunId={run.id}
+          onRunSelect={onLineageRunSelect}
         />
       )}
     </div>

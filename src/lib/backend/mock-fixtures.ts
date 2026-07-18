@@ -61,6 +61,7 @@ const FIXED_RESULTS: FixtureData = {
 
 // preset-2: all success
 ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "AMD", "TSM", "AVGO", "COST"].forEach((sym, i) => {
+  const matchedConditionCount = i % 2 === 0 ? 1 : 0;
   FIXED_RESULTS["preset-2"][sym] = {
     symbol: sym,
     success: true,
@@ -73,9 +74,9 @@ const FIXED_RESULTS: FixtureData = {
       bollingerLower: 90 + i * 10,
       bollingerMiddle: 100 + i * 12,
       bollingerUpper: 110 + i * 14,
-      matchedConditionCount: i % 2 === 0 ? 1 : 0,
-      allConditionsMatched: i % 2 === 0,
-      anyConditionMatched: true,
+      matchedConditionCount,
+      allConditionsMatched: matchedConditionCount === 1,
+      anyConditionMatched: matchedConditionCount > 0,
       dataStale: false,
     },
     error: null,
@@ -84,6 +85,7 @@ const FIXED_RESULTS: FixtureData = {
 
 // preset-3: partial failure
 ["AAPL", "MSFT", "NVDA"].forEach((sym, i) => {
+  const matchedConditionCount = i === 0 ? 1 : 0;
   FIXED_RESULTS["preset-3"][sym] = {
     symbol: sym,
     success: true,
@@ -96,9 +98,9 @@ const FIXED_RESULTS: FixtureData = {
       bollingerLower: 130 + i * 10,
       bollingerMiddle: 150 + i * 15,
       bollingerUpper: 170 + i * 20,
-      matchedConditionCount: i === 0 ? 1 : 0,
-      allConditionsMatched: i === 0,
-      anyConditionMatched: true,
+      matchedConditionCount,
+      allConditionsMatched: matchedConditionCount === 1,
+      anyConditionMatched: matchedConditionCount > 0,
       dataStale: false,
     },
     error: null,
@@ -107,7 +109,7 @@ const FIXED_RESULTS: FixtureData = {
 FIXED_RESULTS["preset-3"]["GOOGL"] = {
   symbol: "GOOGL",
   success: false,
-  result: null as unknown as ScanResult,
+  result: null,
   error: {
     symbol: "GOOGL",
     code: "NETWORK_RETRY",
@@ -120,7 +122,7 @@ FIXED_RESULTS["preset-3"]["GOOGL"] = {
 FIXED_RESULTS["preset-3"]["AMD"] = {
   symbol: "AMD",
   success: false,
-  result: null as unknown as ScanResult,
+  result: null,
   error: {
     symbol: "AMD",
     code: "DATA_NOT_FOUND",
@@ -131,6 +133,7 @@ FIXED_RESULTS["preset-3"]["AMD"] = {
   },
 };
 ["TSM", "AVGO", "COST"].forEach((sym, i) => {
+  const matchedConditionCount = i === 0 ? 1 : 0;
   FIXED_RESULTS["preset-3"][sym] = {
     symbol: sym,
     success: true,
@@ -143,9 +146,9 @@ FIXED_RESULTS["preset-3"]["AMD"] = {
       bollingerLower: 70 + i * 8,
       bollingerMiddle: 80 + i * 10,
       bollingerUpper: 90 + i * 12,
-      matchedConditionCount: i === 0 ? 1 : 0,
-      allConditionsMatched: false,
-      anyConditionMatched: i === 0,
+      matchedConditionCount,
+      allConditionsMatched: matchedConditionCount === 1,
+      anyConditionMatched: matchedConditionCount > 0,
       dataStale: false,
     },
     error: null,

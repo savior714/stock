@@ -157,3 +157,60 @@ describe("mock retry - basic flow", () => {
     expect((run.symbolsSnapshotJson as string[]).length).toBe(4);
   });
 });
+
+describe("mock retry - result invariants", () => {
+  beforeEach(() => {
+    resetBackendClientForTest();
+    resetMockStore();
+    process.env.NEXT_PUBLIC_STOCK_BACKEND = "mock";
+  });
+
+  it("retry generated results satisfy anyConditionMatched invariant", async () => {
+    const client = getBackendClient();
+
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-3",
+    });
+    for (let i = 0; i < 9; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+
+    const errors = await client.scans.getErrors(runId);
+    const retryableErrors = errors.filter((e) => e.retryable && e.symbol !== null);
+    const retryRunId = await client.scans.retry(runId);
+
+    for (let i = 0; i < retryableErrors.length; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(retryRunId);
+    }
+
+    const results = await client.scans.getResults(retryRunId);
+    for (const r of results) {
+      expect(r.anyConditionMatched).toBe(r.matchedConditionCount > 0);
+    }
+  });
+
+  it("retry results: no count 0 with OR true", async () => {
+    const client = getBackendClient();
+
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-3",
+    });
+    for (let i = 0; i < 9; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+
+    const errors = await client.scans.getErrors(runId);
+    const retryableErrors = errors.filter((e) => e.retryable && e.symbol !== null);
+    const retryRunId = await client.scans.retry(runId);
+
+    for (let i = 0; i < retryableErrors.length; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(retryRunId);
+    }
+
+    const results = await client.scans.getResults(retryRunId);
+    const violations = results.filter((r) => r.matchedConditionCount === 0 && r.anyConditionMatched);
+    expect(violations).toHaveLength(0);
+  });
+});

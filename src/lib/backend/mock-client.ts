@@ -31,6 +31,76 @@ import type { BackendClient } from "./types";
 import { createMockStore, type MockStore } from "./mock-store";
 import { FIXED_RESULTS, INITIAL_PRESETS } from "./mock-fixtures";
 
+const DEFAULT_TRADE_DATE = "2025-07-17";
+
+function buildDeterministicMockResult(
+  symbol: string,
+  hash: number,
+): ScanResult | null {
+  if (hash === 2) {
+    return null;
+  }
+  const matchedConditionCount = hash % 2 === 0 ? 1 : 0;
+  return {
+    symbol,
+    tradeDate: DEFAULT_TRADE_DATE,
+    currentPrice: 100 + hash * 50,
+    rsi: 30 + hash * 10,
+    mfi: 25 + hash * 8,
+    bollingerLower: 90 + hash * 10,
+    bollingerMiddle: 100 + hash * 12,
+    bollingerUpper: 110 + hash * 14,
+    matchedConditionCount,
+    allConditionsMatched: matchedConditionCount > 0,
+    anyConditionMatched: matchedConditionCount > 0,
+    dataStale: false,
+  };
+}
+
+function buildDeterministicMockError(
+  symbol: string,
+  hash: number,
+): ScanError | null {
+  if (hash !== 2) {
+    return null;
+  }
+  return {
+    symbol,
+    code: "NETWORK_RETRY",
+    message: "Yahoo Finance API retry limit exceeded",
+    detail: "temporary network error",
+    retryable: true,
+    attempt: 3,
+  };
+}
+
+type FixtureEntryFromClient = {
+  success: boolean;
+  result: ScanResult | null;
+  error: ScanError | null;
+};
+
+function buildSymbolResult(
+  symbol: string,
+  fixtureData: Record<string, FixtureEntryFromClient>,
+  presetId: string,
+): { success: boolean; result: ScanResult | null; error: ScanError | null } {
+  const fixture = fixtureData?.[symbol];
+  if (fixture) {
+    return {
+      success: fixture.success,
+      result: fixture.result as ScanResult | null,
+      error: fixture.error as ScanError | null,
+    };
+  }
+  const hash = symbol.charCodeAt(0) % 3;
+  return {
+    success: hash !== 2,
+    result: buildDeterministicMockResult(symbol, hash),
+    error: buildDeterministicMockError(symbol, hash),
+  };
+}
+
 let store: MockStore | null = null;
 
 function getStore(): MockStore {
@@ -158,48 +228,8 @@ class MockBackendClient implements BackendClient {
       const fixtureData = FIXED_RESULTS[presetId];
       // Build resultsData only for watchlist symbols, with defaults for missing fixtures
       const resultsData: Record<string, { success: boolean; result: ScanResult | null; error: ScanError | null }> = {};
-      const tradeDate = "2025-07-17";
       for (const sym of symbols) {
-        const fixture = fixtureData?.[sym];
-        if (fixture) {
-          resultsData[sym] = {
-            success: fixture.success,
-            result: fixture.result as ScanResult | null,
-            error: fixture.error as ScanError | null,
-          };
-        } else {
-          // Default: success with deterministic data based on symbol hash
-          const hash = sym.charCodeAt(0) % 3;
-          resultsData[sym] = {
-            success: hash !== 2,
-            result: hash !== 2
-              ? {
-                  symbol: sym,
-                  tradeDate,
-                  currentPrice: 100 + hash * 50,
-                  rsi: 30 + hash * 10,
-                  mfi: 25 + hash * 8,
-                  bollingerLower: 90 + hash * 10,
-                  bollingerMiddle: 100 + hash * 12,
-                  bollingerUpper: 110 + hash * 14,
-                  matchedConditionCount: hash % 2 === 0 ? 1 : 0,
-                  allConditionsMatched: hash % 2 === 0,
-                  anyConditionMatched: true,
-                  dataStale: false,
-                }
-              : null,
-            error: hash === 2
-              ? {
-                  symbol: sym,
-                  code: "NETWORK_RETRY",
-                  message: "Yahoo Finance API retry limit exceeded",
-                  detail: "temporary network error",
-                  retryable: true,
-                  attempt: 3,
-                }
-              : null,
-          };
-        }
+        resultsData[sym] = buildSymbolResult(sym, fixtureData, presetId);
       }
       const delayMs = presetId === "preset-4" ? 200 : 80;
 
@@ -293,48 +323,9 @@ class MockBackendClient implements BackendClient {
       // Build results data for retry symbols only
       const presetId = originalDetail.presetId;
       const fixtureData = FIXED_RESULTS[presetId];
-      const tradeDate = "2025-07-17";
       const retryResultsData: Record<string, { success: boolean; result: ScanResult | null; error: ScanError | null }> = {};
       for (const sym of uniqueRetrySymbols) {
-        const fixture = fixtureData?.[sym];
-        if (fixture) {
-          retryResultsData[sym] = {
-            success: fixture.success,
-            result: fixture.result as ScanResult | null,
-            error: fixture.error as ScanError | null,
-          };
-        } else {
-          const hash = sym.charCodeAt(0) % 3;
-          retryResultsData[sym] = {
-            success: hash !== 2,
-            result: hash !== 2
-              ? {
-                  symbol: sym,
-                  tradeDate,
-                  currentPrice: 100 + hash * 50,
-                  rsi: 30 + hash * 10,
-                  mfi: 25 + hash * 8,
-                  bollingerLower: 90 + hash * 10,
-                  bollingerMiddle: 100 + hash * 12,
-                  bollingerUpper: 110 + hash * 14,
-                  matchedConditionCount: hash % 2 === 0 ? 1 : 0,
-                  allConditionsMatched: hash % 2 === 0,
-                  anyConditionMatched: true,
-                  dataStale: false,
-                }
-              : null,
-            error: hash === 2
-              ? {
-                  symbol: sym,
-                  code: "NETWORK_RETRY",
-                  message: "Yahoo Finance API retry limit exceeded",
-                  detail: "temporary network error",
-                  retryable: true,
-                  attempt: 3,
-                }
-              : null,
-          };
-        }
+        retryResultsData[sym] = buildSymbolResult(sym, fixtureData, presetId);
       }
 
       const delayMs = presetId === "preset-4" ? 200 : 80;

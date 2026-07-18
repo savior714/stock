@@ -85,6 +85,20 @@ export default function ScanRunSetup({
   const consumedResumeRef = useRef<string | null>(null);
   const notifiedTerminalRunsRef = useRef(new Set<string>());
 
+  // ── Centralized notify helper ──
+  const notifyResumeCompleted = useCallback(
+    (detail: ScanRunDetail) => {
+      if (!resumeRunId) return;
+      if (detail.id !== resumeRunId) return;
+      if (detail.status !== "completed") return;
+      if (notifiedTerminalRunsRef.current.has(detail.id)) return;
+
+      notifiedTerminalRunsRef.current.add(detail.id);
+      onResumeRunCompleted?.(detail);
+    },
+    [resumeRunId, onResumeRunCompleted],
+  );
+
   useEffect(() => {
     if (externalPresetId && presetExists) {
       const found = presets.find((p) => p.id === externalPresetId);
@@ -107,15 +121,7 @@ export default function ScanRunSetup({
             clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
           }
-          if (
-            resumeRunId &&
-            detail.id === resumeRunId &&
-            detail.status === "completed" &&
-            !notifiedTerminalRunsRef.current.has(detail.id)
-          ) {
-            notifiedTerminalRunsRef.current.add(detail.id);
-            onResumeRunCompleted?.(detail);
-          }
+          notifyResumeCompleted(detail);
           try {
             const errors = await getScanErrors(runId);
             setState((s) => ({ ...s, errors, isRunning: false, isCancelling: false }));
@@ -127,7 +133,7 @@ export default function ScanRunSetup({
         // polling error — keep trying
       }
     }, 2000);
-  }, [resumeRunId, onResumeRunCompleted]);
+  }, [notifyResumeCompleted]);
 
   // ── Resume run initialization ──
   useEffect(() => {
@@ -151,13 +157,8 @@ export default function ScanRunSetup({
         }));
         if (detail.status === "running") {
           startPolling(resumeRunId);
-        } else if (
-          detail.id === resumeRunId &&
-          detail.status === "completed" &&
-          !notifiedTerminalRunsRef.current.has(detail.id)
-        ) {
-          notifiedTerminalRunsRef.current.add(detail.id);
-          onResumeRunCompleted?.(detail);
+        } else if (detail.status === "completed") {
+          notifyResumeCompleted(detail);
         }
       })
       .catch(() => {
@@ -176,7 +177,7 @@ export default function ScanRunSetup({
     return () => {
       cancelled = true;
     };
-  }, [resumeRunId, startPolling, onResumeRunCompleted]);
+  }, [resumeRunId, startPolling, notifyResumeCompleted]);
 
   useEffect(() => {
     if (state.currentRunId && state.isRunning) {
@@ -212,21 +213,20 @@ export default function ScanRunSetup({
 
   const handleCompleted = useCallback((payload: ScanEventPayload) => {
     if (payload.runId !== state.currentRunId) return;
-    if (
-      resumeRunId &&
-      payload.runId === resumeRunId &&
-      !notifiedTerminalRunsRef.current.has(payload.runId)
-    ) {
-      notifiedTerminalRunsRef.current.add(payload.runId);
-      getScanRun(payload.runId).then((detail) => {
-        if (detail.status === "completed") {
-          onResumeRunCompleted?.(detail);
-        }
-      }).catch(() => {
-        // ignore — polling will catch up
+    if (!resumeRunId || payload.runId !== resumeRunId) return;
+
+    // Only notify after successfully fetching the final detail.
+    // If fetch fails, the Set is NOT modified and polling fallback
+    // will handle the completion.
+    getScanRun(payload.runId)
+      .then((detail) => {
+        notifyResumeCompleted(detail);
+      })
+      .catch(() => {
+        // fetch failed — do NOT add to notified set.
+        // polling will catch up and call notifyResumeCompleted.
       });
-    }
-  }, [state.currentRunId, resumeRunId, onResumeRunCompleted]);
+  }, [state.currentRunId, resumeRunId, notifyResumeCompleted]);
 
   useEffect(() => {
     if (!state.currentRunId) return;

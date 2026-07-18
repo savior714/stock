@@ -24,11 +24,12 @@ function formatNumber(value: number | null): string {
   return value.toFixed(2);
 }
 
-export default function ScanResultsTable({ results, runId, isLoading, run }: {
+export default function ScanResultsTable({ results, runId, isLoading, run, onRunSelect }: {
   results: ScanResult[];
   runId: string;
   isLoading?: boolean;
   run?: ScanRunDetail | null;
+  onRunSelect?: (run: ScanRunDetail) => void;
 }) {
   const [matchMode, setMatchMode] = useState<"and" | "or" | "none">("none");
   const [includeStale, setIncludeStale] = useState(true);
@@ -77,7 +78,7 @@ export default function ScanResultsTable({ results, runId, isLoading, run }: {
   const { runs: lineageRuns, isLoading: lineageLoading } = useScanLineage(run ?? null);
 
   const handleLineageRunSelect = (selectedRun: ScanRunDetail) => {
-    // Handled by parent via onRunSelect prop pattern
+    onRunSelect?.(selectedRun);
   };
 
   if (isLoading) {
@@ -89,6 +90,13 @@ export default function ScanResultsTable({ results, runId, isLoading, run }: {
             <h3>Results for Run {runId}</h3>
           </div>
         </div>
+        {run && lineageRuns.length > 0 && !lineageLoading && (
+          <ScanLineageTrail
+            runs={lineageRuns}
+            currentRunId={runId}
+            onRunSelect={handleLineageRunSelect}
+          />
+        )}
         <p className={styles.mutedCenter}>Loading results…</p>
       </div>
     );
@@ -103,6 +111,13 @@ export default function ScanResultsTable({ results, runId, isLoading, run }: {
             <h3>Results for Run {runId}</h3>
           </div>
         </div>
+        {run && lineageRuns.length > 0 && !lineageLoading && (
+          <ScanLineageTrail
+            runs={lineageRuns}
+            currentRunId={runId}
+            onRunSelect={handleLineageRunSelect}
+          />
+        )}
         <div className="empty-state" style={{ minHeight: "200px" }}>
           <h3>No results</h3>
           <p>No scan results available.</p>

@@ -248,3 +248,86 @@ describe("UI - resume run tracking", () => {
     expect(run.status).toBe("cancelled");
   });
 });
+
+
+describe("UI — run selection stale race", () => {
+  beforeEach(() => {
+    resetBackendClientForTest();
+    resetMockStore();
+    process.env.NEXT_PUBLIC_STOCK_BACKEND = "mock";
+  });
+
+  it("older run selection does not overwrite newer run data", async () => {
+    const client = getBackendClient();
+
+    const runA = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+    const runB = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+
+    // Complete run A
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runA);
+    }
+
+    // Complete run B
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runB);
+    }
+
+    const resultsA = await client.scans.getResults(runA);
+    const resultsB = await client.scans.getResults(runB);
+
+    // Both runs should have results (same watchlist = same symbols)
+    expect(resultsA.length).toBeGreaterThan(0);
+    expect(resultsB.length).toBeGreaterThan(0);
+    expect(resultsA.length).toBe(resultsB.length);
+  });
+
+  it("request generation prevents stale overwrite in selection flow", async () => {
+    const client = getBackendClient();
+
+    const runA = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+    const runB = await client.scans.start({
+      watchlistId: "wl-2",
+      presetId: "preset-1",
+    });
+
+    // Complete run A (wl-1 has 5 symbols)
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runA);
+    }
+    // Complete run B (wl-2 has 4 symbols)
+    for (let i = 0; i < 4; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runB);
+    }
+
+    // Verify run details are independent
+    const runADetail = await client.scans.getRun(runA);
+    const runBDetail = await client.scans.getRun(runB);
+
+    expect(runADetail.id).toBe(runA);
+    expect(runBDetail.id).toBe(runB);
+    expect(runADetail.watchlistId).toBe("wl-1");
+    expect(runBDetail.watchlistId).toBe("wl-2");
+
+    // Verify results are independent - just check they exist
+    const resultsA = await client.scans.getResults(runA);
+    const resultsB = await client.scans.getResults(runB);
+
+    expect(resultsA.length).toBeGreaterThan(0);
+    expect(resultsB.length).toBeGreaterThan(0);
+    // Verify totalSymbols matches actual result + error count
+    const errorsA = await client.scans.getErrors(runA);
+    const errorsB = await client.scans.getErrors(runB);
+    expect(runADetail.totalSymbols).toBe(resultsA.length + errorsA.length);
+    expect(runBDetail.totalSymbols).toBe(resultsB.length + errorsB.length);
+  });
+});

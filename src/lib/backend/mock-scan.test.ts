@@ -204,3 +204,90 @@ describe("mock scan - run history", async () => {
     expect(results.length + errors.length).toBe(run.totalSymbols);
   });
 });
+
+describe("mock scan - result invariants", async () => {
+  beforeEach(() => {
+    resetBackendClientForTest();
+    resetMockStore();
+    process.env.NEXT_PUBLIC_STOCK_BACKEND = "mock";
+  });
+
+  it("preset-2: anyConditionMatched matches matchedConditionCount > 0", async () => {
+    const client = getBackendClient();
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+    const results = await client.scans.getResults(runId);
+    for (const r of results) {
+      expect(r.anyConditionMatched).toBe(r.matchedConditionCount > 0);
+    }
+  });
+
+  it("preset-3: anyConditionMatched matches matchedConditionCount > 0", async () => {
+    const client = getBackendClient();
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-3",
+    });
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+    const results = await client.scans.getResults(runId);
+    for (const r of results) {
+      expect(r.anyConditionMatched).toBe(r.matchedConditionCount > 0);
+    }
+  });
+
+  it("preset-2: allConditionsMatched true means matchedCount === enabledCount", async () => {
+    const client = getBackendClient();
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+    const results = await client.scans.getResults(runId);
+    const preset = (await client.presets.list()).find((p) => p.id === "preset-2");
+    const enabledCount = preset?.enabledConditionCount ?? 1;
+    for (const r of results) {
+      if (r.allConditionsMatched) {
+        expect(r.matchedConditionCount).toBe(enabledCount);
+      }
+    }
+  });
+
+  it("no result has count 0 with OR true", async () => {
+    const client = getBackendClient();
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+    const results = await client.scans.getResults(runId);
+    const violations = results.filter((r) => r.matchedConditionCount === 0 && r.anyConditionMatched);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("no result has count > enabledCount", async () => {
+    const client = getBackendClient();
+    const runId = await client.scans.start({
+      watchlistId: "wl-1",
+      presetId: "preset-2",
+    });
+    for (let i = 0; i < 5; i++) {
+      (client as unknown as { scans: { _tick: (id: string) => void } }).scans._tick(runId);
+    }
+    const results = await client.scans.getResults(runId);
+    const preset = (await client.presets.list()).find((p) => p.id === "preset-2");
+    const enabledCount = preset?.enabledConditionCount ?? 1;
+    const violations = results.filter((r) => r.matchedConditionCount > enabledCount);
+    expect(violations).toHaveLength(0);
+  });
+});
